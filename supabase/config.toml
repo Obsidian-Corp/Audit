@@ -1,0 +1,79 @@
+project_id = "otbviownvtbuatjsoezq"
+
+[functions.admin-auth]
+verify_jwt = false
+
+[functions.admin-auth-verify]
+verify_jwt = false
+
+[functions.admin-bootstrap]
+verify_jwt = false
+
+[functions.log_admin_auth_attempt]
+verify_jwt = false
+
+[functions.admin-migration-start]
+verify_jwt = false
+
+[functions.admin-migration-complete]
+verify_jwt = false
+
+[functions.admin-migration-verify-token]
+verify_jwt = false
+
+[functions.admin-emergency-log]
+verify_jwt = false
+
+[functions.admin-active-sessions]
+verify_jwt = false
+
+[functions.admin-get-scopes]
+verify_jwt = false
+
+[functions.admin-create-feature-flag]
+verify_jwt = false
+
+[functions.admin-create-app-version]
+verify_jwt = false
+
+[functions.admin-invite-admin]
+verify_jwt = false
+
+[functions.admin-accept-invitation]
+verify_jwt = false
+
+[functions.admin-revoke-invitation]
+verify_jwt = false
+
+[functions.admin-resolve-sla-violation]
+verify_jwt = false
+
+[functions.admin-handle-access-request]
+verify_jwt = false
+
+[functions.admin-handle-health-alert]
+verify_jwt = false
+
+[functions.admin-acknowledge-anomaly]
+verify_jwt = false
+
+[functions.admin-security-metrics]
+verify_jwt = false
+
+[functions.admin-get-auth-logs]
+verify_jwt = false
+
+[functions.admin-get-privilege-logs]
+verify_jwt = false
+
+[functions.admin-export-activity]
+verify_jwt = false
+
+[functions.admin-session-activity]
+verify_jwt = false
+
+[functions.admin-session-revoke]
+verify_jwt = false
+
+[functions.send-email]
+verify_jwt = false

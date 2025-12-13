@@ -1,0 +1,518 @@
+-- Migration: Finding Management & Cross-Reference System
+-- Purpose: Enable finding tracking, linkage, and impact analysis across procedures
+-- Phase: 1 (Foundation) - Part of Problem #5 solution
+-- Date: 2025-11-30
+
+-- ============================================================================
+-- 1. AUDIT FINDINGS TABLE
+-- ============================================================================
+-- Stores issues/exceptions identified during procedure execution
+
+CREATE TABLE IF NOT EXISTS public.audit_findings (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  engagement_id UUID NOT NULL REFERENCES public.audits(id) ON DELETE CASCADE,
+  engagement_procedure_id UUID REFERENCES public.engagement_procedures(id) ON DELETE SET NULL,
+
+  -- Finding Details
+  finding_title TEXT NOT NULL,
+  finding_description TEXT NOT NULL,
+  finding_type TEXT NOT NULL CHECK (finding_type IN ('control_deficiency', 'misstatement', 'exception', 'observation', 'other')),
+  severity TEXT NOT NULL CHECK (severity IN ('trivial', 'immaterial', 'material', 'significant_deficiency', 'material_weakness')),
+
+  -- Financial Impact
+  quantified_amount NUMERIC CHECK (quantified_amount >= 0),
+  materiality_impact TEXT CHECK (materiality_impact IN ('none', 'below_trivial', 'below_performance', 'performance', 'planning')),
+
+  -- Related Areas
+  affected_accounts TEXT[] DEFAULT '{}',
+  affected_areas TEXT[] DEFAULT '{}', -- e.g., ['cash', 'revenue', 'controls']
+
+  -- Management Response
+  management_response TEXT,
+  corrective_action_plan TEXT,
+  remediation_deadline DATE,
+  remediation_status TEXT DEFAULT 'pending' CHECK (remediation_status IN ('pending', 'in_progress', 'completed', 'not_applicable')),
+
+  -- Status Tracking
+  status TEXT DEFAULT 'open' CHECK (status IN ('open', 'in_remediation', 'resolved', 'accepted_risk', 'cleared')),
+  identified_date DATE NOT NULL DEFAULT CURRENT_DATE,
+  resolved_date DATE,
+  resolution_notes TEXT,
+
+  -- Follow-up
+  requires_follow_up BOOLEAN DEFAULT true,
+  follow_up_procedures JSONB DEFAULT '[]'::jsonb, -- Array of procedure IDs or descriptions
+
+  -- Workflow
+  identified_by UUID REFERENCES auth.users(id),
+  reviewed_by UUID REFERENCES auth.users(id),
+  reviewed_at TIMESTAMPTZ,
+  review_notes TEXT,
+
+  -- Metadata
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now(),
+
+  -- Constraints
+  CONSTRAINT resolved_date_after_identified CHECK (resolved_date IS NULL OR resolved_date >= identified_date)
+);
+
+CREATE INDEX idx_findings_engagement ON public.audit_findings(engagement_id);
+CREATE INDEX idx_findings_procedure ON public.audit_findings(engagement_procedure_id);
+CREATE INDEX idx_findings_status ON public.audit_findings(status, severity);
+CREATE INDEX idx_findings_severity ON public.audit_findings(severity, engagement_id);
+CREATE INDEX idx_findings_materiality ON public.audit_findings(materiality_impact, engagement_id);
+CREATE INDEX idx_findings_affected_areas_gin ON public.audit_findings USING GIN(affected_areas);
+
+COMMENT ON TABLE public.audit_findings IS
+  'Issues, exceptions, and control deficiencies identified during audit procedures';
+
+COMMENT ON COLUMN public.audit_findings.severity IS
+  'trivial: < trivial threshold; immaterial: < performance materiality; material: >= performance materiality; significant_deficiency/material_weakness: control deficiencies';
+
+COMMENT ON COLUMN public.audit_findings.materiality_impact IS
+  'Impact on materiality levels: none, below_trivial, below_performance, performance, planning';
+
+-- ============================================================================
+-- 2. FINDING PROCEDURE LINKAGES TABLE
+-- ============================================================================
+-- Links findings to related/impacted procedures for cross-referencing
+
+CREATE TABLE IF NOT EXISTS public.finding_procedure_linkages (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  finding_id UUID NOT NULL REFERENCES public.audit_findings(id) ON DELETE CASCADE,
+  procedure_id UUID NOT NULL REFERENCES public.audit_procedures(id) ON DELETE CASCADE,
+  engagement_procedure_id UUID REFERENCES public.engagement_procedures(id) ON DELETE SET NULL,
+
+  -- Linkage Type
+  linkage_type TEXT NOT NULL CHECK (linkage_type IN ('originated_from', 'impacts', 'triggers_follow_up', 'related')),
+
+  -- Impact Details
+  impact_description TEXT,
+  requires_expanded_testing BOOLEAN DEFAULT false,
+  expanded_testing_details TEXT,
+
+  -- Status
+  linkage_status TEXT DEFAULT 'active' CHECK (linkage_status IN ('active', 'resolved', 'not_applicable')),
+
+  -- Workflow
+  linked_by UUID REFERENCES auth.users(id),
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now(),
+
+  CONSTRAINT unique_finding_procedure_link UNIQUE(finding_id, procedure_id, linkage_type)
+);
+
+CREATE INDEX idx_finding_linkages_finding ON public.finding_procedure_linkages(finding_id);
+CREATE INDEX idx_finding_linkages_procedure ON public.finding_procedure_linkages(procedure_id);
+CREATE INDEX idx_finding_linkages_engagement_proc ON public.finding_procedure_linkages(engagement_procedure_id);
+CREATE INDEX idx_finding_linkages_type ON public.finding_procedure_linkages(linkage_type, linkage_status);
+
+COMMENT ON TABLE public.finding_procedure_linkages IS
+  'Links findings to related procedures, enabling impact analysis and follow-up tracking';
+
+COMMENT ON COLUMN public.finding_procedure_linkages.linkage_type IS
+  'originated_from: finding came from this procedure; impacts: finding affects this procedure; triggers_follow_up: finding requires this procedure; related: informational';
+
+-- ============================================================================
+-- 3. FINDING EVIDENCE TABLE
+-- ============================================================================
+-- Evidence supporting findings (separate from procedure evidence)
+
+CREATE TABLE IF NOT EXISTS public.finding_evidence (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  finding_id UUID NOT NULL REFERENCES public.audit_findings(id) ON DELETE CASCADE,
+
+  -- Evidence Details
+  evidence_type TEXT CHECK (evidence_type IN ('document', 'screenshot', 'calculation', 'confirmation', 'communication', 'other')),
+  evidence_description TEXT NOT NULL,
+  file_url TEXT, -- Storage bucket URL
+  file_name TEXT,
+  file_size_bytes BIGINT CHECK (file_size_bytes >= 0),
+
+  -- Metadata
+  uploaded_by UUID REFERENCES auth.users(id),
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX idx_finding_evidence_finding ON public.finding_evidence(finding_id);
+
+COMMENT ON TABLE public.finding_evidence IS
+  'Evidence supporting audit findings (separate from general procedure evidence)';
+
+-- ============================================================================
+-- 4. FINDING COMMENTS/DISCUSSION THREAD
+-- ============================================================================
+-- Collaborative discussion about findings
+
+CREATE TABLE IF NOT EXISTS public.finding_comments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  finding_id UUID NOT NULL REFERENCES public.audit_findings(id) ON DELETE CASCADE,
+
+  -- Comment Details
+  comment_text TEXT NOT NULL,
+  comment_type TEXT DEFAULT 'general' CHECK (comment_type IN ('general', 'question', 'resolution', 'escalation')),
+
+  -- Threading
+  parent_comment_id UUID REFERENCES public.finding_comments(id) ON DELETE CASCADE,
+
+  -- Workflow
+  created_by UUID REFERENCES auth.users(id),
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  is_edited BOOLEAN DEFAULT false
+);
+
+CREATE INDEX idx_finding_comments_finding ON public.finding_comments(finding_id, created_at DESC);
+CREATE INDEX idx_finding_comments_parent ON public.finding_comments(parent_comment_id);
+
+COMMENT ON TABLE public.finding_comments IS
+  'Discussion thread for findings, enabling collaboration on resolution';
+
+-- ============================================================================
+-- 5. PROGRAM VERSIONING TABLES
+-- ============================================================================
+-- Track changes to engagement programs over time (scope changes)
+
+CREATE TABLE IF NOT EXISTS public.engagement_program_versions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  engagement_program_id UUID NOT NULL REFERENCES public.engagement_programs(id) ON DELETE CASCADE,
+
+  -- Version Info
+  version_number INTEGER NOT NULL CHECK (version_number > 0),
+  version_type TEXT NOT NULL CHECK (version_type IN ('initial', 'scope_change', 'finding_response', 'risk_update', 'other')),
+
+  -- Change Details
+  change_date DATE NOT NULL DEFAULT CURRENT_DATE,
+  change_reason TEXT NOT NULL,
+  change_summary TEXT,
+
+  -- What Changed
+  procedures_added JSONB DEFAULT '[]'::jsonb,
+  procedures_removed JSONB DEFAULT '[]'::jsonb,
+  procedures_modified JSONB DEFAULT '[]'::jsonb,
+
+  -- Impact Analysis
+  hours_delta NUMERIC DEFAULT 0,
+  budget_impact NUMERIC DEFAULT 0,
+  timeline_impact_days INTEGER DEFAULT 0,
+
+  -- Related Findings (if applicable)
+  related_finding_ids UUID[] DEFAULT '{}',
+
+  -- Workflow
+  changed_by UUID REFERENCES auth.users(id),
+  approved_by UUID REFERENCES auth.users(id),
+  approval_date DATE,
+  approval_status TEXT DEFAULT 'pending' CHECK (approval_status IN ('pending', 'approved', 'rejected')),
+
+  created_at TIMESTAMPTZ DEFAULT now(),
+
+  CONSTRAINT unique_program_version UNIQUE(engagement_program_id, version_number)
+);
+
+CREATE INDEX idx_program_versions_program ON public.engagement_program_versions(engagement_program_id, version_number DESC);
+CREATE INDEX idx_program_versions_type ON public.engagement_program_versions(version_type);
+CREATE INDEX idx_program_versions_approval ON public.engagement_program_versions(approval_status);
+
+COMMENT ON TABLE public.engagement_program_versions IS
+  'Audit trail of changes to engagement programs (scope changes, additions, removals)';
+
+COMMENT ON COLUMN public.engagement_program_versions.procedures_added IS
+  'JSONB array: [{"procedure_id": "...", "procedure_code": "FSA-200", "reason": "..."}]';
+
+-- ============================================================================
+-- 6. PROCEDURE EXECUTION HISTORY
+-- ============================================================================
+-- Detailed audit trail of procedure work
+
+CREATE TABLE IF NOT EXISTS public.procedure_execution_history (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  engagement_procedure_id UUID NOT NULL REFERENCES public.engagement_procedures(id) ON DELETE CASCADE,
+
+  -- Change Event
+  event_type TEXT NOT NULL CHECK (event_type IN (
+    'created', 'assigned', 'started', 'status_changed', 'hours_updated',
+    'evidence_added', 'review_requested', 'reviewed', 'completed', 'reopened'
+  )),
+  event_timestamp TIMESTAMPTZ DEFAULT now(),
+
+  -- Change Details
+  old_value JSONB,
+  new_value JSONB,
+  change_description TEXT,
+
+  -- Context
+  changed_by UUID REFERENCES auth.users(id),
+  change_reason TEXT,
+
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX idx_procedure_history_procedure ON public.procedure_execution_history(engagement_procedure_id, event_timestamp DESC);
+CREATE INDEX idx_procedure_history_event_type ON public.procedure_execution_history(event_type);
+CREATE INDEX idx_procedure_history_user ON public.procedure_execution_history(changed_by);
+
+COMMENT ON TABLE public.procedure_execution_history IS
+  'Complete audit trail of all changes to procedure execution (who, what, when, why)';
+
+-- ============================================================================
+-- ROW LEVEL SECURITY (RLS)
+-- ============================================================================
+
+ALTER TABLE public.audit_findings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.finding_procedure_linkages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.finding_evidence ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.finding_comments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.engagement_program_versions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.procedure_execution_history ENABLE ROW LEVEL SECURITY;
+
+-- Findings: Access via engagement
+CREATE POLICY "Users access findings via engagement"
+  ON public.audit_findings FOR ALL
+  USING (
+    engagement_id IN (
+      SELECT id FROM public.audits
+      WHERE firm_id IN (SELECT firm_id FROM public.profiles WHERE id = auth.uid())
+    )
+  );
+
+-- Linkages: Access via finding
+CREATE POLICY "Users access linkages via findings"
+  ON public.finding_procedure_linkages FOR ALL
+  USING (
+    finding_id IN (
+      SELECT id FROM public.audit_findings
+      WHERE engagement_id IN (
+        SELECT id FROM public.audits
+        WHERE firm_id IN (SELECT firm_id FROM public.profiles WHERE id = auth.uid())
+      )
+    )
+  );
+
+-- Evidence: Access via finding
+CREATE POLICY "Users access evidence via findings"
+  ON public.finding_evidence FOR ALL
+  USING (
+    finding_id IN (
+      SELECT id FROM public.audit_findings
+      WHERE engagement_id IN (
+        SELECT id FROM public.audits
+        WHERE firm_id IN (SELECT firm_id FROM public.profiles WHERE id = auth.uid())
+      )
+    )
+  );
+
+-- Comments: Access via finding
+CREATE POLICY "Users access comments via findings"
+  ON public.finding_comments FOR ALL
+  USING (
+    finding_id IN (
+      SELECT id FROM public.audit_findings
+      WHERE engagement_id IN (
+        SELECT id FROM public.audits
+        WHERE firm_id IN (SELECT firm_id FROM public.profiles WHERE id = auth.uid())
+      )
+    )
+  );
+
+-- Program Versions: Access via program
+CREATE POLICY "Users access program versions"
+  ON public.engagement_program_versions FOR ALL
+  USING (
+    engagement_program_id IN (
+      SELECT id FROM public.engagement_programs
+      WHERE engagement_id IN (
+        SELECT id FROM public.audits
+        WHERE firm_id IN (SELECT firm_id FROM public.profiles WHERE id = auth.uid())
+      )
+    )
+  );
+
+-- Execution History: Access via procedure
+CREATE POLICY "Users access execution history"
+  ON public.procedure_execution_history FOR ALL
+  USING (
+    engagement_procedure_id IN (
+      SELECT id FROM public.engagement_procedures
+      WHERE engagement_id IN (
+        SELECT id FROM public.audits
+        WHERE firm_id IN (SELECT firm_id FROM public.profiles WHERE id = auth.uid())
+      )
+    )
+  );
+
+-- ============================================================================
+-- FUNCTIONS & TRIGGERS
+-- ============================================================================
+
+-- Function: Update timestamp on findings
+CREATE OR REPLACE FUNCTION update_finding_timestamp()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER update_findings_timestamp
+  BEFORE UPDATE ON public.audit_findings
+  FOR EACH ROW
+  EXECUTE FUNCTION update_finding_timestamp();
+
+CREATE TRIGGER update_linkages_timestamp
+  BEFORE UPDATE ON public.finding_procedure_linkages
+  FOR EACH ROW
+  EXECUTE FUNCTION update_finding_timestamp();
+
+CREATE TRIGGER update_comments_timestamp
+  BEFORE UPDATE ON public.finding_comments
+  FOR EACH ROW
+  EXECUTE FUNCTION update_finding_timestamp();
+
+-- Function: Auto-create execution history entry
+CREATE OR REPLACE FUNCTION log_procedure_execution_event()
+RETURNS TRIGGER AS $$
+DECLARE
+  v_event_type TEXT;
+  v_old_value JSONB;
+  v_new_value JSONB;
+  v_description TEXT;
+BEGIN
+  -- Determine event type based on what changed
+  IF TG_OP = 'INSERT' THEN
+    v_event_type := 'created';
+    v_new_value := to_jsonb(NEW);
+    v_description := 'Procedure created';
+
+  ELSIF TG_OP = 'UPDATE' THEN
+    -- Status change
+    IF OLD.status IS DISTINCT FROM NEW.status THEN
+      v_event_type := 'status_changed';
+      v_old_value := jsonb_build_object('status', OLD.status);
+      v_new_value := jsonb_build_object('status', NEW.status);
+      v_description := 'Status changed from ' || OLD.status || ' to ' || NEW.status;
+
+    -- Assignment change
+    ELSIF OLD.assigned_to IS DISTINCT FROM NEW.assigned_to THEN
+      v_event_type := 'assigned';
+      v_old_value := jsonb_build_object('assigned_to', OLD.assigned_to);
+      v_new_value := jsonb_build_object('assigned_to', NEW.assigned_to);
+      v_description := 'Reassigned to different user';
+
+    -- Hours updated
+    ELSIF OLD.actual_hours IS DISTINCT FROM NEW.actual_hours THEN
+      v_event_type := 'hours_updated';
+      v_old_value := jsonb_build_object('actual_hours', OLD.actual_hours);
+      v_new_value := jsonb_build_object('actual_hours', NEW.actual_hours);
+      v_description := 'Actual hours updated';
+
+    ELSE
+      -- Generic update
+      v_event_type := 'status_changed';
+      v_description := 'Procedure updated';
+    END IF;
+
+  END IF;
+
+  -- Insert history record
+  IF v_event_type IS NOT NULL THEN
+    INSERT INTO public.procedure_execution_history (
+      engagement_procedure_id,
+      event_type,
+      old_value,
+      new_value,
+      change_description,
+      changed_by
+    ) VALUES (
+      NEW.id,
+      v_event_type,
+      v_old_value,
+      v_new_value,
+      v_description,
+      auth.uid()
+    );
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Trigger: Log all changes to engagement_procedures
+CREATE TRIGGER log_engagement_procedure_changes
+  AFTER INSERT OR UPDATE ON public.engagement_procedures
+  FOR EACH ROW
+  EXECUTE FUNCTION log_procedure_execution_event();
+
+-- Function: Analyze finding impact on procedures
+CREATE OR REPLACE FUNCTION analyze_finding_impact(p_finding_id UUID)
+RETURNS TABLE (
+  impacted_procedure_id UUID,
+  procedure_code TEXT,
+  procedure_name TEXT,
+  impact_reason TEXT,
+  requires_expansion BOOLEAN
+) AS $$
+BEGIN
+  RETURN QUERY
+  WITH finding_details AS (
+    SELECT
+      f.affected_areas,
+      f.affected_accounts,
+      f.severity,
+      f.materiality_impact,
+      f.engagement_id
+    FROM public.audit_findings f
+    WHERE f.id = p_finding_id
+  )
+  SELECT
+    p.id AS impacted_procedure_id,
+    p.procedure_code,
+    p.procedure_name,
+    'Procedure addresses affected area: ' || unnest(fd.affected_areas) AS impact_reason,
+    CASE
+      WHEN fd.materiality_impact IN ('performance', 'planning') THEN true
+      ELSE false
+    END AS requires_expansion
+  FROM public.audit_procedures p
+  CROSS JOIN finding_details fd
+  WHERE p.risk_area_tags && fd.affected_areas -- Array overlap operator
+    AND p.is_active = true;
+END;
+$$ LANGUAGE plpgsql STABLE;
+
+COMMENT ON FUNCTION analyze_finding_impact IS
+  'Analyzes which procedures are impacted by a finding based on affected areas';
+
+-- Function: Get finding summary statistics for engagement
+CREATE OR REPLACE FUNCTION get_engagement_finding_stats(p_engagement_id UUID)
+RETURNS TABLE (
+  total_findings INTEGER,
+  open_findings INTEGER,
+  material_findings INTEGER,
+  control_deficiencies INTEGER,
+  avg_resolution_days NUMERIC
+) AS $$
+BEGIN
+  RETURN QUERY
+  SELECT
+    COUNT(*)::INTEGER AS total_findings,
+    COUNT(*) FILTER (WHERE status = 'open')::INTEGER AS open_findings,
+    COUNT(*) FILTER (WHERE severity IN ('material', 'significant_deficiency', 'material_weakness'))::INTEGER AS material_findings,
+    COUNT(*) FILTER (WHERE finding_type = 'control_deficiency')::INTEGER AS control_deficiencies,
+    AVG(EXTRACT(DAY FROM (resolved_date - identified_date))) FILTER (WHERE resolved_date IS NOT NULL) AS avg_resolution_days
+  FROM public.audit_findings
+  WHERE engagement_id = p_engagement_id;
+END;
+$$ LANGUAGE plpgsql STABLE;
+
+-- ============================================================================
+-- GRANTS
+-- ============================================================================
+
+GRANT SELECT, INSERT, UPDATE ON public.audit_findings TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.finding_procedure_linkages TO authenticated;
+GRANT SELECT, INSERT, DELETE ON public.finding_evidence TO authenticated;
+GRANT SELECT, INSERT, UPDATE ON public.finding_comments TO authenticated;
+GRANT SELECT, INSERT ON public.engagement_program_versions TO authenticated;
+GRANT SELECT ON public.procedure_execution_history TO authenticated;

@@ -1,0 +1,47 @@
+-- Remove Admin Tables from Product Database
+-- Run this ONLY on product database (jyffsdfiontiliobhkpm)
+-- DO NOT run on admin database (otbviownvtbuatjsoezq)
+
+-- Drop Billing Tables
+DROP TABLE IF EXISTS public.stripe_customers CASCADE;
+DROP TABLE IF EXISTS public.payment_methods CASCADE;
+DROP TABLE IF EXISTS public.organization_subscriptions CASCADE;
+DROP TABLE IF EXISTS public.invoices CASCADE;
+DROP TABLE IF EXISTS public.invoice_line_items CASCADE;
+DROP TABLE IF EXISTS public.payment_failures CASCADE;
+DROP TABLE IF EXISTS public.usage_events CASCADE;
+DROP TABLE IF EXISTS platform_admin.stripe_config CASCADE;
+DROP TABLE IF EXISTS platform_admin.subscription_plans CASCADE;
+
+-- Drop Impersonation Tables
+DROP TABLE IF EXISTS platform_admin.impersonation_sessions CASCADE;
+DROP TABLE IF EXISTS platform_admin.impersonation_actions CASCADE;
+
+-- Drop Email Template Tables
+DROP TABLE IF EXISTS platform_admin.email_templates CASCADE;
+DROP TABLE IF EXISTS platform_admin.email_template_versions CASCADE;
+DROP TABLE IF EXISTS public.email_sent_log CASCADE;
+DROP TABLE IF EXISTS platform_admin.email_analytics CASCADE;
+
+-- Drop Performance Monitoring Tables
+DROP TABLE IF EXISTS platform_admin.slow_query_log CASCADE;
+DROP TABLE IF EXISTS platform_admin.api_performance_log CASCADE;
+DROP TABLE IF EXISTS platform_admin.api_performance_hourly CASCADE;
+DROP TABLE IF EXISTS platform_admin.resource_utilization CASCADE;
+DROP TABLE IF EXISTS platform_admin.performance_alerts CASCADE;
+
+-- Drop Functions
+DROP FUNCTION IF EXISTS increment_email_analytics(TEXT, TEXT);
+DROP FUNCTION IF EXISTS platform_admin.aggregate_api_performance_hourly();
+
+-- Remove migration records for admin tables (so they don't get skipped)
+DELETE FROM supabase_migrations.schema_migrations
+WHERE version IN (
+  '20251125215838',
+  '20251125220423',
+  '20251126101446',
+  '20251126101737'
+);
+
+-- Verify cleanup
+SELECT 'Admin tables dropped successfully!' as status;

@@ -1,0 +1,229 @@
+-- Migration: Create Materiality Calculator tables
+-- Issue #6: Materiality Calculator
+-- Date: 2025-11-29
+-- Requirement: AU-C Section 320 "Materiality in Planning and Performing an Audit"
+
+-- Create materiality_calculations table
+CREATE TABLE IF NOT EXISTS materiality_calculations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  engagement_id UUID REFERENCES audits(id) ON DELETE CASCADE NOT NULL,
+  firm_id UUID REFERENCES firms(id) NOT NULL,
+
+  -- Benchmark selection
+  benchmark_type TEXT NOT NULL, -- 'revenue', 'total_assets', 'net_income', 'equity', 'expenses'
+  benchmark_value DECIMAL(15,2) NOT NULL,
+  benchmark_year INTEGER,
+
+  -- Materiality calculations
+  overall_materiality_percentage DECIMAL(5,2) NOT NULL DEFAULT 5.0, -- % of benchmark
+  overall_materiality DECIMAL(15,2) NOT NULL,
+
+  performance_materiality_percentage DECIMAL(5,2) NOT NULL DEFAULT 75.0, -- % of overall
+  performance_materiality DECIMAL(15,2) NOT NULL,
+
+  clearly_trivial_percentage DECIMAL(5,2) NOT NULL DEFAULT 5.0, -- % of overall
+  clearly_trivial_threshold DECIMAL(15,2) NOT NULL,
+
+  -- Component materiality (for group audits)
+  component_materiality DECIMAL(15,2),
+  component_performance_materiality DECIMAL(15,2),
+
+  -- Rationale and notes
+  benchmark_rationale TEXT,
+  percentage_rationale TEXT,
+  additional_notes TEXT,
+
+  -- Industry-specific considerations
+  industry TEXT,
+  risk_level TEXT, -- 'low', 'medium', 'high'
+
+  -- Audit metadata
+  approved_by UUID REFERENCES profiles(id),
+  approved_at TIMESTAMPTZ,
+  version INTEGER DEFAULT 1,
+  is_current BOOLEAN DEFAULT true,
+
+  created_by UUID REFERENCES profiles(id) DEFAULT auth.uid(),
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Create indexes
+CREATE INDEX IF NOT EXISTS idx_materiality_engagement ON materiality_calculations(engagement_id, is_current DESC);
+CREATE INDEX IF NOT EXISTS idx_materiality_firm ON materiality_calculations(firm_id, created_at DESC);
+
+-- Enable RLS
+ALTER TABLE materiality_calculations ENABLE ROW LEVEL SECURITY;
+
+-- RLS Policies
+CREATE POLICY "Users can view materiality for their firm's engagements"
+  ON materiality_calculations FOR SELECT
+  USING (
+    firm_id IN (
+      SELECT firm_id FROM profiles WHERE user_id = auth.uid()
+    )
+  );
+
+CREATE POLICY "Users can insert materiality for their firm's engagements"
+  ON materiality_calculations FOR INSERT
+  WITH CHECK (
+    firm_id IN (
+      SELECT firm_id FROM profiles WHERE user_id = auth.uid()
+    )
+    AND engagement_id IN (
+      SELECT id FROM audits WHERE firm_id IN (
+        SELECT firm_id FROM profiles WHERE user_id = auth.uid()
+      )
+    )
+  );
+
+CREATE POLICY "Users can update materiality for their firm's engagements"
+  ON materiality_calculations FOR UPDATE
+  USING (
+    firm_id IN (
+      SELECT firm_id FROM profiles WHERE user_id = auth.uid()
+    )
+  );
+
+-- Function: Calculate materiality values
+CREATE OR REPLACE FUNCTION calculate_materiality_values(
+  benchmark_value_param DECIMAL,
+  overall_percentage_param DECIMAL,
+  performance_percentage_param DECIMAL,
+  trivial_percentage_param DECIMAL
+)
+RETURNS TABLE (
+  overall_materiality DECIMAL,
+  performance_materiality DECIMAL,
+  clearly_trivial DECIMAL
+)
+LANGUAGE plpgsql
+IMMUTABLE
+AS $$
+BEGIN
+  RETURN QUERY
+  SELECT
+    ROUND(benchmark_value_param * (overall_percentage_param / 100), 2) AS overall_materiality,
+    ROUND(benchmark_value_param * (overall_percentage_param / 100) * (performance_percentage_param / 100), 2) AS performance_materiality,
+    ROUND(benchmark_value_param * (overall_percentage_param / 100) * (trivial_percentage_param / 100), 2) AS clearly_trivial;
+END;
+$$;
+
+-- Function: Get industry standard percentages
+CREATE OR REPLACE FUNCTION get_industry_materiality_guidance(
+  industry_param TEXT,
+  benchmark_type_param TEXT
+)
+RETURNS TABLE (
+  recommended_overall_percentage DECIMAL,
+  recommended_performance_percentage DECIMAL,
+  recommended_trivial_percentage DECIMAL,
+  rationale TEXT
+)
+LANGUAGE plpgsql
+IMMUTABLE
+AS $$
+BEGIN
+  -- Industry-specific guidance based on professional standards and best practices
+  RETURN QUERY
+  SELECT
+    CASE
+      WHEN benchmark_type_param = 'revenue' THEN
+        CASE
+          WHEN industry_param IN ('manufacturing', 'retail', 'wholesale') THEN 1.0
+          WHEN industry_param IN ('financial_services', 'banking') THEN 0.5
+          WHEN industry_param IN ('technology', 'saas') THEN 2.0
+          WHEN industry_param IN ('nonprofit', 'government') THEN 1.5
+          ELSE 1.0
+        END
+      WHEN benchmark_type_param = 'total_assets' THEN
+        CASE
+          WHEN industry_param IN ('financial_services', 'banking', 'insurance') THEN 0.5
+          WHEN industry_param IN ('real_estate') THEN 1.0
+          WHEN industry_param IN ('manufacturing') THEN 1.0
+          ELSE 0.75
+        END
+      WHEN benchmark_type_param = 'net_income' THEN 5.0
+      WHEN benchmark_type_param = 'equity' THEN 2.0
+      WHEN benchmark_type_param = 'expenses' THEN 2.0
+      ELSE 1.0
+    END AS recommended_overall_percentage,
+    75.0 AS recommended_performance_percentage, -- Standard is 50-75%
+    5.0 AS recommended_trivial_percentage, -- Standard is 3-5%
+    CASE
+      WHEN benchmark_type_param = 'revenue' THEN 'Revenue-based materiality is common for entities with stable revenue streams.'
+      WHEN benchmark_type_param = 'total_assets' THEN 'Asset-based materiality is common for financial institutions and asset-intensive businesses.'
+      WHEN benchmark_type_param = 'net_income' THEN 'Net income-based materiality is common but can be volatile; use with caution.'
+      WHEN benchmark_type_param = 'equity' THEN 'Equity-based materiality is common for investment funds and holding companies.'
+      WHEN benchmark_type_param = 'expenses' THEN 'Expense-based materiality is common for nonprofits and cost-plus contractors.'
+      ELSE 'Select appropriate benchmark based on entity characteristics.'
+    END AS rationale;
+END;
+$$;
+
+-- Trigger: Update updated_at timestamp
+CREATE OR REPLACE FUNCTION trigger_update_materiality_timestamp()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER materiality_update_timestamp
+  BEFORE UPDATE ON materiality_calculations
+  FOR EACH ROW
+  EXECUTE FUNCTION trigger_update_materiality_timestamp();
+
+-- Trigger: Log materiality calculation activity
+CREATE OR REPLACE FUNCTION trigger_log_materiality_activity()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+BEGIN
+  -- Log when materiality is calculated
+  IF (TG_OP = 'INSERT') THEN
+    PERFORM log_engagement_activity(
+      NEW.engagement_id,
+      'materiality_calculated',
+      'Materiality calculated: Overall $' || NEW.overall_materiality::TEXT || ', Performance $' || NEW.performance_materiality::TEXT,
+      jsonb_build_object(
+        'materiality_id', NEW.id,
+        'benchmark_type', NEW.benchmark_type,
+        'overall_materiality', NEW.overall_materiality,
+        'performance_materiality', NEW.performance_materiality
+      )
+    );
+  -- Log when materiality is updated
+  ELSIF (TG_OP = 'UPDATE' AND NEW.overall_materiality != OLD.overall_materiality) THEN
+    PERFORM log_engagement_activity(
+      NEW.engagement_id,
+      'materiality_updated',
+      'Materiality updated from $' || OLD.overall_materiality::TEXT || ' to $' || NEW.overall_materiality::TEXT,
+      jsonb_build_object(
+        'materiality_id', NEW.id,
+        'old_overall', OLD.overall_materiality,
+        'new_overall', NEW.overall_materiality
+      )
+    );
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER materiality_activity_log
+  AFTER INSERT OR UPDATE ON materiality_calculations
+  FOR EACH ROW
+  EXECUTE FUNCTION trigger_log_materiality_activity();
+
+-- Comments
+COMMENT ON TABLE materiality_calculations IS 'Materiality calculations per AU-C 320 for financial statement audits';
+COMMENT ON COLUMN materiality_calculations.overall_materiality IS 'Overall materiality level for the financial statements as a whole';
+COMMENT ON COLUMN materiality_calculations.performance_materiality IS 'Performance materiality (typically 50-75% of overall) to reduce risk of misstatements exceeding overall materiality';
+COMMENT ON COLUMN materiality_calculations.clearly_trivial_threshold IS 'Clearly trivial threshold (typically 3-5% of overall) below which misstatements need not be accumulated';
+COMMENT ON FUNCTION calculate_materiality_values IS 'Helper function to calculate materiality values from benchmark and percentages';
+COMMENT ON FUNCTION get_industry_materiality_guidance IS 'Returns recommended materiality percentages based on industry and benchmark type';

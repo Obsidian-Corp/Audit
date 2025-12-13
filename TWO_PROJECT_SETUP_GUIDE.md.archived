@@ -1,0 +1,214 @@
+# Two-Project Supabase Architecture Setup Guide
+
+## Architecture Overview
+
+This audit platform uses **two separate Supabase projects** for enhanced security:
+
+### Project 1: Product Database (Main Platform)
+- **Project ID**: `jyffsdfiontiliobhkpm`
+- **URL**: `https://jyffsdfiontiliobhkpm.supabase.co`
+- **Contains**:
+  - Firms, engagements, clients
+  - Users, audit data
+  - Reports, findings
+  - Time tracking, billing
+  - All product-facing tables
+
+### Project 2: Admin Panel Database (Separate)
+- **Project ID**: `otbviownvtbuatjsoezq`
+- **URL**: `https://otbviownvtbuatjsoezq.supabase.co`
+- **Contains**:
+  - Billing & subscriptions (Stripe)
+  - User impersonation sessions
+  - Email templates
+  - Performance monitoring
+
+---
+
+## File Structure
+
+```
+build-it-happens-37494/
+├── supabase/                       # Product database
+│   ├── migrations/                 # 42 product migrations
+│   └── functions/                  # Product edge functions
+│
+├── supabase-admin/                 # Admin database (NEW)
+│   ├── migrations/                 # 4 admin migrations
+│   │   ├── 20251125215838_create_billing_tables.sql
+│   │   ├── 20251125220423_create_impersonation_tables.sql
+│   │   ├── 20251126101446_create_email_templates.sql
+│   │   └── 20251126101737_create_performance_monitoring.sql
+│   └── functions/                  # Admin edge functions (8 functions)
+│       ├── stripe-webhook/
+│       ├── create-stripe-customer/
+│       ├── create-subscription/
+│       ├── admin-start-impersonation/
+│       ├── admin-end-impersonation/
+│       ├── admin-log-impersonation-action/
+│       ├── send-email/
+│       └── collect-performance-metrics/
+│
+├── src/
+│   ├── integrations/supabase/
+│   │   ├── client.ts              # Product database client
+│   │   └── admin-client.ts        # Admin database client (NEW)
+│   ├── lib/
+│   │   ├── supabase.ts            # Product client alias
+│   │   └── supabase-admin.ts      # Admin client alias (NEW)
+│   ├── components/platform-admin/ # Uses admin-client
+│   └── components/...              # Uses product client
+│
+└── .env                            # Both project credentials
+```
+
+---
+
+## Environment Variables
+
+```bash
+# Product Database (Main Platform)
+VITE_SUPABASE_PROJECT_ID="jyffsdfiontiliobhkpm"
+VITE_SUPABASE_PUBLISHABLE_KEY="eyJ..."
+VITE_SUPABASE_URL="https://jyffsdfiontiliobhkpm.supabase.co"
+
+# Admin Panel Database (Separate Project)
+VITE_ADMIN_SUPABASE_PROJECT_ID="otbviownvtbuatjsoezq"
+VITE_ADMIN_SUPABASE_PUBLISHABLE_KEY="eyJ..."
+VITE_ADMIN_SUPABASE_URL="https://otbviownvtbuatjsoezq.supabase.co"
+```
+
+---
+
+## Deployment Instructions
+
+### 1. Deploy Product Database
+
+```bash
+# Login to Supabase
+supabase login
+
+# Link to product project
+cd /Users/abdulkarimsankareh/Downloads/build-it-happens-37494
+supabase link --project-ref jyffsdfiontiliobhkpm
+
+# Deploy product migrations (42 files)
+supabase db push
+
+# Verify
+supabase db remote list
+```
+
+### 2. Deploy Admin Database
+
+```bash
+# Create supabase config for admin project
+cd supabase-admin
+echo 'project_id = "otbviownvtbuatjsoezq"' > config.toml
+
+# Link to admin project (from parent directory)
+cd ..
+supabase link --project-ref otbviownvtbuatjsoezq --workdir supabase-admin
+
+# Deploy admin migrations (4 files)
+cd supabase-admin
+supabase db push
+
+# Deploy edge functions
+supabase functions deploy stripe-webhook
+supabase functions deploy create-stripe-customer
+supabase functions deploy create-subscription
+supabase functions deploy admin-start-impersonation
+supabase functions deploy admin-end-impersonation
+supabase functions deploy admin-log-impersonation-action
+supabase functions deploy send-email
+supabase functions deploy collect-performance-metrics
+```
+
+### 3. Set Edge Function Secrets (Admin Project)
+
+```bash
+# Stripe (for billing)
+supabase secrets set STRIPE_SECRET_KEY=sk_test_...
+supabase secrets set STRIPE_WEBHOOK_SECRET=whsec_...
+
+# Email (Resend)
+supabase secrets set RESEND_API_KEY=re_...
+supabase secrets set EMAIL_FROM="YourApp <noreply@yourdomain.com>"
+
+# JWT for impersonation
+supabase secrets set JWT_SECRET=$(openssl rand -base64 32)
+```
+
+---
+
+## Security Benefits
+
+✅ **Physical Isolation** - Product hack doesn't expose admin data
+✅ **Different Credentials** - Separate API keys and database passwords
+✅ **Blast Radius Containment** - Ransomware limited to one project
+✅ **Compliance Ready** - SOC 2 auditors approve
+✅ **Role Separation** - Product engineers can't access admin tables
+✅ **Regional Isolation** - Can deploy to different regions if needed
+
+---
+
+## Code Usage
+
+### Product Database (Most Components)
+```typescript
+import { supabase } from '@/lib/supabase';
+// or
+import { supabase } from '@/integrations/supabase/client';
+
+// Use for: firms, engagements, clients, users, audit data
+```
+
+### Admin Database (Admin Panel Only)
+```typescript
+import { supabaseAdmin } from '@/lib/supabase-admin';
+// or
+import { supabaseAdmin } from '@/integrations/supabase/admin-client';
+
+// Use for: billing, impersonation, email templates, performance
+```
+
+---
+
+## Components Using Admin Client
+
+✅ `src/components/platform-admin/SubscriptionPlanManager.tsx`
+✅ `src/components/platform-admin/EmailTemplateManager.tsx`
+✅ `src/components/platform-admin/EmailTemplateEditor.tsx`
+✅ `src/components/platform-admin/ImpersonationAuditLog.tsx`
+✅ `src/components/platform-admin/SlowQueryDashboard.tsx`
+✅ `src/components/platform-admin/APIPerformanceDashboard.tsx`
+✅ `src/components/billing/PaymentMethodManager.tsx`
+✅ `src/pages/billing/Billing.tsx`
+✅ `src/hooks/useImpersonation.ts`
+
+---
+
+## Migration Guide (If Combining Later)
+
+If you later want to combine into one project:
+
+1. Copy admin migrations to main `supabase/migrations/`
+2. Update all `supabaseAdmin` imports back to `supabase`
+3. Run `supabase db push` on product project
+4. Delete admin project
+
+---
+
+## Monitoring
+
+- **Product DB**: Monitor in Supabase Dashboard → Project `jyffsdfiontiliobhkpm`
+- **Admin DB**: Monitor in Supabase Dashboard → Project `otbviownvtbuatjsoezq`
+
+---
+
+## Cost
+
+- **Product DB**: Free tier → $25/mo (Pro) when you get customers
+- **Admin DB**: Free tier → $25/mo (Pro) when you need better SLAs
+- **Total**: $0/mo initially, $50/mo at scale (small price for security)

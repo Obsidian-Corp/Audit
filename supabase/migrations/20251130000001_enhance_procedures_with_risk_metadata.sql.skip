@@ -1,0 +1,487 @@
+-- Migration: Enhanced Procedure Risk Metadata
+-- Purpose: Add risk intelligence to procedure library for smart recommendations
+-- Phase: 1 (Foundation)
+-- Date: 2025-11-30
+
+-- ============================================================================
+-- 1. ENHANCE EXISTING AUDIT_PROCEDURES TABLE
+-- ============================================================================
+
+-- Add risk intelligence columns to existing audit_procedures table
+ALTER TABLE public.audit_procedures
+  ADD COLUMN IF NOT EXISTS applicable_risk_levels TEXT[] DEFAULT ARRAY['low', 'medium', 'high', 'significant'],
+  ADD COLUMN IF NOT EXISTS applicable_industries TEXT[] DEFAULT '{}',
+  ADD COLUMN IF NOT EXISTS trigger_conditions JSONB DEFAULT '[]'::jsonb,
+  ADD COLUMN IF NOT EXISTS risk_area_tags TEXT[] DEFAULT '{}',
+  ADD COLUMN IF NOT EXISTS procedure_rationale TEXT,
+  ADD COLUMN IF NOT EXISTS dynamic_parameters JSONB DEFAULT '{}'::jsonb;
+
+-- Add column comments for documentation
+COMMENT ON COLUMN public.audit_procedures.applicable_risk_levels IS
+  'Risk levels where this procedure is applicable (e.g., [''high'', ''significant''] for enhanced AR procedures)';
+
+COMMENT ON COLUMN public.audit_procedures.applicable_industries IS
+  'Industries where this procedure is particularly relevant (e.g., [''healthcare'', ''financial_services''])';
+
+COMMENT ON COLUMN public.audit_procedures.trigger_conditions IS
+  'Conditions that automatically recommend this procedure as JSONB array. Example: [{\"type\": \"engagement_attribute\", \"field\": \"engagement_type\", \"operator\": \"equals\", \"value\": \"first_year\"}]';
+
+COMMENT ON COLUMN public.audit_procedures.risk_area_tags IS
+  'Financial statement areas this procedure addresses (e.g., [''cash'', ''accounts_receivable''])';
+
+COMMENT ON COLUMN public.audit_procedures.procedure_rationale IS
+  'Explains WHY auditors perform this procedure - helps with understanding, not just following steps';
+
+COMMENT ON COLUMN public.audit_procedures.dynamic_parameters IS
+  'Risk-adjusted parameters by risk level. Example: {\"low_risk\": {\"sample_size\": \"60%\", \"hours\": 2}, \"high_risk\": {\"sample_size\": \"100%\", \"hours\": 6}}';
+
+-- ============================================================================
+-- 2. PROCEDURE RISK MAPPINGS TABLE
+-- ============================================================================
+-- Explicit mappings between risk areas and procedures with recommendation logic
+
+CREATE TABLE IF NOT EXISTS public.procedure_risk_mappings (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  procedure_id UUID NOT NULL REFERENCES public.audit_procedures(id) ON DELETE CASCADE,
+
+  -- Risk Context
+  risk_area TEXT NOT NULL, -- e.g., 'cash', 'accounts_receivable', 'revenue'
+  risk_level_required TEXT NOT NULL CHECK (risk_level_required IN ('low', 'medium', 'high', 'significant')),
+
+  -- Recommendation Logic
+  is_recommended BOOLEAN DEFAULT true,
+  is_required BOOLEAN DEFAULT false, -- If true, this procedure is mandatory for this risk level
+  recommendation_priority INTEGER DEFAULT 1 CHECK (recommendation_priority > 0), -- 1=highest priority
+
+  -- Risk-Adjusted Parameters
+  sample_size_override TEXT,
+  estimated_hours_override NUMERIC CHECK (estimated_hours_override >= 0),
+  depth_guidance TEXT CHECK (depth_guidance IN ('limited', 'standard', 'enhanced', 'extensive')),
+
+  -- Conditional Logic
+  conditional_logic JSONB DEFAULT '{}'::jsonb, -- Additional conditions for recommendation
+
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now(),
+
+  CONSTRAINT unique_procedure_risk_mapping UNIQUE(procedure_id, risk_area, risk_level_required)
+);
+
+COMMENT ON TABLE public.procedure_risk_mappings IS
+  'Maps procedures to risk areas and risk levels, driving the recommendation engine';
+
+COMMENT ON COLUMN public.procedure_risk_mappings.is_required IS
+  'If true, this procedure is REQUIRED (not just recommended) for this risk level';
+
+COMMENT ON COLUMN public.procedure_risk_mappings.recommendation_priority IS
+  'Lower numbers = higher priority. Used to order recommendations (1=highest)';
+
+COMMENT ON COLUMN public.procedure_risk_mappings.depth_guidance IS
+  'How deeply to test: limited (basic), standard (normal), enhanced (more depth), extensive (full)';
+
+COMMENT ON COLUMN public.procedure_risk_mappings.conditional_logic IS
+  'JSONB with additional conditions: {\"requires\": {\"engagement_type\": \"first_year\", \"company_size\": [\"large\", \"enterprise\"]}}';
+
+-- ============================================================================
+-- 3. PROCEDURE DEPENDENCIES TABLE (if not exists)
+-- ============================================================================
+-- Track logical dependencies between procedures
+
+CREATE TABLE IF NOT EXISTS public.procedure_dependencies (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  procedure_id UUID NOT NULL REFERENCES public.audit_procedures(id) ON DELETE CASCADE,
+  depends_on_procedure_id UUID NOT NULL REFERENCES public.audit_procedures(id) ON DELETE CASCADE,
+  dependency_type TEXT DEFAULT 'must_complete' CHECK (dependency_type IN ('must_complete', 'must_start', 'should_complete', 'informational')),
+  dependency_description TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+
+  CONSTRAINT no_self_dependency CHECK (procedure_id != depends_on_procedure_id),
+  CONSTRAINT unique_dependency UNIQUE(procedure_id, depends_on_procedure_id)
+);
+
+COMMENT ON TABLE public.procedure_dependencies IS
+  'Logical dependencies between procedures (e.g., AR Aging should be done before AR Confirmations)';
+
+COMMENT ON COLUMN public.procedure_dependencies.dependency_type IS
+  'must_complete: hard blocker; should_complete: recommended; informational: just related';
+
+-- ============================================================================
+-- INDEXES FOR PERFORMANCE
+-- ============================================================================
+
+-- Risk-based procedure lookups (core recommendation queries)
+CREATE INDEX IF NOT EXISTS idx_procedure_risk_mappings_area_level
+  ON public.procedure_risk_mappings(risk_area, risk_level_required);
+
+CREATE INDEX IF NOT EXISTS idx_procedure_risk_mappings_procedure
+  ON public.procedure_risk_mappings(procedure_id);
+
+CREATE INDEX IF NOT EXISTS idx_procedure_risk_mappings_priority
+  ON public.procedure_risk_mappings(risk_area, risk_level_required, recommendation_priority);
+
+-- GIN indexes for array columns (efficient contains/overlap queries)
+CREATE INDEX IF NOT EXISTS idx_procedures_risk_tags_gin
+  ON public.audit_procedures USING GIN(risk_area_tags);
+
+CREATE INDEX IF NOT EXISTS idx_procedures_industries_gin
+  ON public.audit_procedures USING GIN(applicable_industries);
+
+CREATE INDEX IF NOT EXISTS idx_procedures_risk_levels_gin
+  ON public.audit_procedures USING GIN(applicable_risk_levels);
+
+-- Dependency lookups
+CREATE INDEX IF NOT EXISTS idx_procedure_dependencies_procedure
+  ON public.procedure_dependencies(procedure_id);
+
+CREATE INDEX IF NOT EXISTS idx_procedure_dependencies_depends_on
+  ON public.procedure_dependencies(depends_on_procedure_id);
+
+-- ============================================================================
+-- ROW LEVEL SECURITY (RLS)
+-- ============================================================================
+
+ALTER TABLE public.procedure_risk_mappings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.procedure_dependencies ENABLE ROW LEVEL SECURITY;
+
+-- Risk Mappings: Accessible via procedure access
+CREATE POLICY "Users access risk mappings via procedures"
+  ON public.procedure_risk_mappings FOR ALL
+  USING (
+    procedure_id IN (
+      SELECT id FROM public.audit_procedures
+      WHERE firm_id IN (SELECT firm_id FROM public.profiles WHERE id = auth.uid())
+    )
+  );
+
+-- Dependencies: Accessible via procedure access
+CREATE POLICY "Users access dependencies via procedures"
+  ON public.procedure_dependencies FOR ALL
+  USING (
+    procedure_id IN (
+      SELECT id FROM public.audit_procedures
+      WHERE firm_id IN (SELECT firm_id FROM public.profiles WHERE id = auth.uid())
+    )
+  );
+
+-- ============================================================================
+-- FUNCTIONS & TRIGGERS
+-- ============================================================================
+
+-- Function: Get recommended procedures for a risk assessment
+CREATE OR REPLACE FUNCTION get_recommended_procedures(
+  p_risk_assessment_id UUID,
+  p_industry TEXT DEFAULT NULL
+)
+RETURNS TABLE (
+  procedure_id UUID,
+  procedure_code TEXT,
+  procedure_name TEXT,
+  risk_area TEXT,
+  risk_level TEXT,
+  is_required BOOLEAN,
+  priority INTEGER,
+  adjusted_sample_size TEXT,
+  adjusted_hours NUMERIC,
+  depth_guidance TEXT,
+  recommendation_reason TEXT
+) AS $$
+BEGIN
+  RETURN QUERY
+  WITH risk_areas AS (
+    -- Get all material risk areas from the assessment
+    SELECT
+      ra.area_name,
+      ra.combined_risk,
+      ra.is_material_area,
+      era.industry
+    FROM public.risk_assessment_areas ra
+    JOIN public.engagement_risk_assessments era ON ra.risk_assessment_id = era.id
+    WHERE ra.risk_assessment_id = p_risk_assessment_id
+      AND ra.is_material_area = true
+  )
+  SELECT DISTINCT
+    p.id AS procedure_id,
+    p.procedure_code,
+    p.procedure_name,
+    prm.risk_area,
+    prm.risk_level_required AS risk_level,
+    prm.is_required,
+    prm.recommendation_priority AS priority,
+    COALESCE(prm.sample_size_override, p.sample_size_guidance) AS adjusted_sample_size,
+    COALESCE(prm.estimated_hours_override, p.estimated_hours) AS adjusted_hours,
+    COALESCE(prm.depth_guidance, 'standard') AS depth_guidance,
+    CASE
+      WHEN prm.is_required THEN
+        'Required for ' || prm.risk_area || ' (assessed as ' || ra.combined_risk || ' risk)'
+      ELSE
+        'Recommended for ' || prm.risk_area || ' (assessed as ' || ra.combined_risk || ' risk)'
+    END AS recommendation_reason
+  FROM public.audit_procedures p
+  INNER JOIN public.procedure_risk_mappings prm ON p.id = prm.procedure_id
+  INNER JOIN risk_areas ra ON prm.risk_area = ra.area_name
+    AND prm.risk_level_required = ra.combined_risk
+  WHERE p.is_active = true
+    AND prm.is_recommended = true
+    AND (
+      -- No industry filter OR procedure applies to all industries OR matches the industry
+      p_industry IS NULL
+      OR p.applicable_industries = '{}'
+      OR p_industry = ANY(p.applicable_industries)
+    )
+  ORDER BY prm.is_required DESC, prm.recommendation_priority ASC, p.procedure_code;
+END;
+$$ LANGUAGE plpgsql STABLE;
+
+COMMENT ON FUNCTION get_recommended_procedures IS
+  'Returns recommended procedures based on a completed risk assessment, ordered by priority';
+
+-- Function: Validate risk-adjusted parameters JSONB structure
+CREATE OR REPLACE FUNCTION validate_dynamic_parameters()
+RETURNS TRIGGER AS $$
+BEGIN
+  -- Ensure dynamic_parameters has valid structure if present
+  IF NEW.dynamic_parameters IS NOT NULL AND NEW.dynamic_parameters != '{}'::jsonb THEN
+    -- Check that it has valid risk levels as keys
+    IF NOT (
+      NEW.dynamic_parameters ? 'low_risk' OR
+      NEW.dynamic_parameters ? 'medium_risk' OR
+      NEW.dynamic_parameters ? 'high_risk' OR
+      NEW.dynamic_parameters ? 'significant_risk'
+    ) THEN
+      RAISE EXCEPTION 'dynamic_parameters must contain at least one valid risk level (low_risk, medium_risk, high_risk, significant_risk)';
+    END IF;
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER validate_procedure_dynamic_parameters
+  BEFORE INSERT OR UPDATE ON public.audit_procedures
+  FOR EACH ROW
+  WHEN (NEW.dynamic_parameters IS NOT NULL)
+  EXECUTE FUNCTION validate_dynamic_parameters();
+
+-- ============================================================================
+-- BACKFILL EXISTING PROCEDURES WITH RISK METADATA
+-- ============================================================================
+-- Add risk intelligence to existing procedures in the library
+
+-- Cash & Cash Equivalents Procedures
+UPDATE public.audit_procedures
+SET
+  risk_area_tags = ARRAY['cash', 'cash_equivalents'],
+  applicable_risk_levels = ARRAY['low', 'medium', 'high', 'significant'],
+  procedure_rationale = CASE procedure_code
+    WHEN 'FSA-100' THEN 'Bank reconciliations are critical for detecting lapping schemes, cash misappropriation, and ensuring proper cutoff. Unreconciled items can hide fraud or errors.'
+    WHEN 'FSA-101' THEN 'Direct confirmation with banks provides independent verification of cash balances and identifies unreported accounts or restrictions.'
+    WHEN 'FSA-102' THEN 'Cutoff testing ensures cash transactions are recorded in the correct period, preventing window dressing or manipulation of cash balances.'
+    ELSE procedure_rationale
+  END,
+  dynamic_parameters = CASE procedure_code
+    WHEN 'FSA-100' THEN '{
+      "low_risk": {"sample_size": "Material accounts >10% of total", "depth": "limited", "estimated_hours": 2},
+      "medium_risk": {"sample_size": "All material accounts >5%", "depth": "standard", "estimated_hours": 4},
+      "high_risk": {"sample_size": "All accounts", "depth": "enhanced", "estimated_hours": 6},
+      "significant_risk": {"sample_size": "100% of accounts with detailed testing", "depth": "extensive", "estimated_hours": 8}
+    }'::jsonb
+    WHEN 'FSA-101' THEN '{
+      "low_risk": {"sample_size": "All bank accounts", "depth": "standard", "estimated_hours": 2},
+      "medium_risk": {"sample_size": "All bank accounts", "depth": "standard", "estimated_hours": 3},
+      "high_risk": {"sample_size": "All accounts + securities", "depth": "enhanced", "estimated_hours": 5},
+      "significant_risk": {"sample_size": "All accounts + expanded procedures", "depth": "extensive", "estimated_hours": 6}
+    }'::jsonb
+    ELSE dynamic_parameters
+  END
+WHERE procedure_code IN ('FSA-100', 'FSA-101', 'FSA-102');
+
+-- Accounts Receivable Procedures
+UPDATE public.audit_procedures
+SET
+  risk_area_tags = ARRAY['accounts_receivable', 'revenue'],
+  applicable_risk_levels = ARRAY['medium', 'high', 'significant'],
+  applicable_industries = ARRAY['healthcare', 'financial_services', 'manufacturing', 'technology'],
+  procedure_rationale = CASE procedure_code
+    WHEN 'FSA-200' THEN 'AR aging analysis identifies collection issues, concentrations, and helps assess collectibility. Critical for healthcare due to payer complexity.'
+    WHEN 'FSA-201' THEN 'Direct confirmation with customers validates existence and accuracy of receivables, one of the most reliable forms of audit evidence.'
+    WHEN 'FSA-202' THEN 'Allowance for doubtful accounts directly impacts net income and requires significant judgment. Healthcare has high uncollectible risk.'
+    WHEN 'FSA-203' THEN 'Revenue cutoff ensures sales are recorded in the proper period, preventing premature or delayed revenue recognition.'
+    ELSE procedure_rationale
+  END,
+  dynamic_parameters = CASE procedure_code
+    WHEN 'FSA-200' THEN '{
+      "medium_risk": {"sample_size": "Full aging analysis", "depth": "standard", "estimated_hours": 4},
+      "high_risk": {"sample_size": "Full aging + trend analysis", "depth": "enhanced", "estimated_hours": 6},
+      "significant_risk": {"sample_size": "Full aging + detailed customer-level review", "depth": "extensive", "estimated_hours": 8}
+    }'::jsonb
+    WHEN 'FSA-201' THEN '{
+      "medium_risk": {"sample_size": "60% coverage", "depth": "standard", "estimated_hours": 6},
+      "high_risk": {"sample_size": "70% coverage + all aged balances", "depth": "enhanced", "estimated_hours": 10},
+      "significant_risk": {"sample_size": "80% coverage + 100% of >90 days", "depth": "extensive", "estimated_hours": 14}
+    }'::jsonb
+    WHEN 'FSA-202' THEN '{
+      "medium_risk": {"sample_size": "Test methodology", "depth": "standard", "estimated_hours": 3},
+      "high_risk": {"sample_size": "Test methodology + historical rates", "depth": "enhanced", "estimated_hours": 5},
+      "significant_risk": {"sample_size": "Detailed account-by-account review", "depth": "extensive", "estimated_hours": 8}
+    }'::jsonb
+    ELSE dynamic_parameters
+  END
+WHERE procedure_code IN ('FSA-200', 'FSA-201', 'FSA-202', 'FSA-203');
+
+-- Inventory Procedures
+UPDATE public.audit_procedures
+SET
+  risk_area_tags = ARRAY['inventory', 'cost_of_goods_sold'],
+  applicable_risk_levels = ARRAY['medium', 'high', 'significant'],
+  applicable_industries = ARRAY['manufacturing', 'retail', 'distribution', 'healthcare'],
+  procedure_rationale = CASE procedure_code
+    WHEN 'FSA-300' THEN 'Physical inventory observation is required by auditing standards and provides direct evidence of existence and condition.'
+    WHEN 'FSA-301' THEN 'Inventory pricing testing ensures proper valuation and compliance with lower of cost or market rules.'
+    WHEN 'FSA-302' THEN 'Cutoff testing prevents manipulation of inventory balances and COGS through period-end timing games.'
+    ELSE procedure_rationale
+  END,
+  dynamic_parameters = '{
+    "medium_risk": {"sample_size": "Major locations covering 80%", "depth": "standard", "estimated_hours": 8},
+    "high_risk": {"sample_size": "All material locations", "depth": "enhanced", "estimated_hours": 12},
+    "significant_risk": {"sample_size": "All locations + detailed variance analysis", "depth": "extensive", "estimated_hours": 20}
+  }'::jsonb
+WHERE procedure_code LIKE 'FSA-3%' AND procedure_code IN ('FSA-300', 'FSA-301', 'FSA-302');
+
+-- Revenue Recognition Procedures
+UPDATE public.audit_procedures
+SET
+  risk_area_tags = ARRAY['revenue', 'accounts_receivable'],
+  applicable_risk_levels = ARRAY['medium', 'high', 'significant'],
+  applicable_industries = ARRAY['technology', 'healthcare', 'manufacturing'],
+  procedure_rationale = 'Revenue is a significant fraud risk area. Testing ensures proper recognition timing, completeness, and accuracy.',
+  trigger_conditions = '[
+    {"type": "engagement_attribute", "field": "engagement_type", "operator": "equals", "value": "first_year"},
+    {"type": "risk_score", "area": "revenue", "operator": ">=", "value": "high"}
+  ]'::jsonb
+WHERE procedure_code LIKE 'FSA-4%';
+
+-- ============================================================================
+-- CREATE RISK MAPPINGS FOR COMMON SCENARIOS
+-- ============================================================================
+
+-- High-Risk AR → Required Procedures
+INSERT INTO public.procedure_risk_mappings (procedure_id, risk_area, risk_level_required, is_required, is_recommended, recommendation_priority, depth_guidance)
+SELECT
+  id,
+  'accounts_receivable',
+  'high',
+  true, -- Required for high risk
+  true,
+  1, -- Highest priority
+  'enhanced'
+FROM public.audit_procedures
+WHERE procedure_code IN ('FSA-200', 'FSA-201', 'FSA-202')
+ON CONFLICT (procedure_id, risk_area, risk_level_required) DO NOTHING;
+
+-- Significant-Risk AR → Additional Procedures
+INSERT INTO public.procedure_risk_mappings (procedure_id, risk_area, risk_level_required, is_required, is_recommended, recommendation_priority, depth_guidance, sample_size_override)
+SELECT
+  id,
+  'accounts_receivable',
+  'significant',
+  true,
+  true,
+  1,
+  'extensive',
+  '80% coverage minimum'
+FROM public.audit_procedures
+WHERE procedure_code IN ('FSA-200', 'FSA-201', 'FSA-202', 'FSA-203')
+ON CONFLICT (procedure_id, risk_area, risk_level_required) DO NOTHING;
+
+-- Medium-Risk AR → Recommended but not required
+INSERT INTO public.procedure_risk_mappings (procedure_id, risk_area, risk_level_required, is_required, is_recommended, recommendation_priority, depth_guidance)
+SELECT
+  id,
+  'accounts_receivable',
+  'medium',
+  false, -- Not required, just recommended
+  true,
+  2,
+  'standard'
+FROM public.audit_procedures
+WHERE procedure_code IN ('FSA-200', 'FSA-201', 'FSA-202')
+ON CONFLICT (procedure_id, risk_area, risk_level_required) DO NOTHING;
+
+-- High-Risk Cash → Required Procedures
+INSERT INTO public.procedure_risk_mappings (procedure_id, risk_area, risk_level_required, is_required, is_recommended, recommendation_priority, depth_guidance)
+SELECT
+  id,
+  'cash',
+  'high',
+  true,
+  true,
+  1,
+  'enhanced'
+FROM public.audit_procedures
+WHERE procedure_code IN ('FSA-100', 'FSA-101', 'FSA-102')
+ON CONFLICT (procedure_id, risk_area, risk_level_required) DO NOTHING;
+
+-- Medium-Risk Cash → Standard Procedures
+INSERT INTO public.procedure_risk_mappings (procedure_id, risk_area, risk_level_required, is_required, is_recommended, recommendation_priority, depth_guidance)
+SELECT
+  id,
+  'cash',
+  'medium',
+  false,
+  true,
+  2,
+  'standard'
+FROM public.audit_procedures
+WHERE procedure_code IN ('FSA-100', 'FSA-101')
+ON CONFLICT (procedure_id, risk_area, risk_level_required) DO NOTHING;
+
+-- High-Risk Revenue → Required Procedures
+INSERT INTO public.procedure_risk_mappings (procedure_id, risk_area, risk_level_required, is_required, is_recommended, recommendation_priority, depth_guidance)
+SELECT
+  id,
+  'revenue',
+  'high',
+  true,
+  true,
+  1,
+  'enhanced'
+FROM public.audit_procedures
+WHERE procedure_code LIKE 'FSA-4%'
+ON CONFLICT (procedure_id, risk_area, risk_level_required) DO NOTHING;
+
+-- ============================================================================
+-- ADD COMMON DEPENDENCIES
+-- ============================================================================
+
+-- AR Aging should be done before AR Confirmations
+INSERT INTO public.procedure_dependencies (procedure_id, depends_on_procedure_id, dependency_type, dependency_description)
+SELECT
+  p1.id,
+  p2.id,
+  'should_complete',
+  'AR Aging provides context for selecting confirmation samples'
+FROM public.audit_procedures p1
+CROSS JOIN public.audit_procedures p2
+WHERE p1.procedure_code = 'FSA-201' -- AR Confirmations
+  AND p2.procedure_code = 'FSA-200' -- AR Aging
+ON CONFLICT (procedure_id, depends_on_procedure_id) DO NOTHING;
+
+-- Bank Reconciliations before Bank Confirmations
+INSERT INTO public.procedure_dependencies (procedure_id, depends_on_procedure_id, dependency_type, dependency_description)
+SELECT
+  p1.id,
+  p2.id,
+  'should_complete',
+  'Review reconciliations before sending confirmations to identify issues'
+FROM public.audit_procedures p1
+CROSS JOIN public.audit_procedures p2
+WHERE p1.procedure_code = 'FSA-101' -- Bank Confirmations
+  AND p2.procedure_code = 'FSA-100' -- Bank Reconciliations
+ON CONFLICT (procedure_id, depends_on_procedure_id) DO NOTHING;
+
+-- ============================================================================
+-- GRANTS
+-- ============================================================================
+
+GRANT SELECT, INSERT, UPDATE ON public.procedure_risk_mappings TO authenticated;
+GRANT SELECT, INSERT, UPDATE ON public.procedure_dependencies TO authenticated;

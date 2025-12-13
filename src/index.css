@@ -1,0 +1,305 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
+All colors MUST be HSL.
+*/
+
+@layer base {
+  :root {
+    /* Palantir Enterprise Theme - Pure Black & Electric Blue */
+    --background: 0 0% 0%;
+    --foreground: 0 0% 100%;
+
+    /* Enhanced elevation system */
+    --card: 214 100% 8%;
+    --card-foreground: 0 0% 100%;
+
+    --popover: 214 80% 12%;
+    --popover-foreground: 0 0% 100%;
+
+    /* Primary Accent - Electric Blue */
+    --primary: 214 100% 50%;
+    --primary-foreground: 0 0% 100%;
+    --primary-glow: 194 100% 50%;
+
+    --secondary: 214 80% 12%;
+    --secondary-foreground: 0 0% 100%;
+
+    --muted: 0 0% 25%;
+    --muted-foreground: 0 0% 70%;
+
+    --accent: 214 100% 50%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 142 71% 45%;
+    --success-subtle: 142 71% 45% / 0.15;
+    --warning: 38 92% 50%;
+    --warning-subtle: 38 92% 50% / 0.15;
+    --info: 217 91% 60%;
+    --info-subtle: 217 91% 60% / 0.15;
+
+    /* Data Visualization Colors */
+    --data-primary: 194 100% 50%;
+    --data-secondary: 174 62% 55%;
+    --data-tertiary: 214 100% 70%;
+
+    /* Refined borders with blue tint */
+    --border: 214 30% 15%;
+    --border-interactive: 214 100% 50% / 0.3;
+    --border-subtle: 214 30% 10%;
+    --input: 214 80% 12%;
+    --ring: 214 100% 50%;
+
+    --radius: 0.5rem;
+
+    /* Enhanced elevation system */
+    --surface: 214 100% 8%;
+    --surface-elevated: 214 80% 12%;
+    --surface-interactive: 214 70% 15%;
+    --nav-text: 0 0% 75%;
+    
+    /* Enhanced shadow system with blue accents */
+    --shadow-blue: 0 10px 30px -5px hsl(214 100% 50% / 0.2);
+    --shadow-blue-lg: 0 20px 50px -10px hsl(214 100% 50% / 0.25);
+    --shadow-subtle: 0 2px 8px 0 hsl(0 0% 0% / 0.4);
+    --shadow-elevation: 0 4px 16px 0 hsl(0 0% 0% / 0.5);
+    
+    /* Hover overlay */
+    --hover-overlay: 214 100% 50% / 0.08;
+
+    /* Status colors */
+    --status-active: 142 71% 45%;
+    --status-pending: 38 92% 50%;
+    --status-error: 0 84% 60%;
+    --status-info: 217 91% 60%;
+    
+    /* Typography weights */
+    --font-light: 300;
+    --font-normal: 400;
+    --font-medium: 500;
+    --font-semibold: 600;
+    --font-bold: 700;
+
+    /* Animation duration - can be overridden for reduced motion */
+    --animation-duration: 200ms;
+  }
+
+  /* High Contrast Mode */
+  .high-contrast {
+    --background: 0 0% 0%;
+    --foreground: 0 0% 100%;
+    --card: 0 0% 10%;
+    --border: 0 0% 30%;
+    --border-interactive: 45 100% 60%;
+    --muted-foreground: 0 0% 85%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+  /* Gantt Chart Custom Styling */
+@layer components {
+  .gantt-container {
+    /* Override default gantt styles to match our design system */
+  }
+
+  /* Gantt table customization */
+  .gantt-container .gantt-table {
+    border-right: 1px solid hsl(var(--border));
+    background-color: hsl(var(--surface));
+  }
+
+  .gantt-container ._3uo9o {
+    background-color: hsl(var(--surface));
+    color: hsl(var(--foreground));
+  }
+
+  /* Gantt header */
+  .gantt-container ._2WixZ {
+    background-color: hsl(var(--surface-elevated));
+    color: hsl(var(--muted-foreground));
+    border-bottom: 1px solid hsl(var(--border));
+  }
+
+  /* Gantt rows */
+  .gantt-container ._1hwHU {
+    background-color: hsl(var(--surface));
+  }
+
+  .gantt-container ._1hwHU:nth-child(even) {
+    background-color: hsl(var(--surface-elevated));
+  }
+
+  /* Grid lines */
+  .gantt-container ._33i-_ {
+    background-color: hsl(var(--border));
+  }
+
+  /* Today line */
+  .gantt-container ._3jqtL {
+    background-color: hsl(var(--gold)) !important;
+    opacity: 0.3;
+  }
+
+  /* Task bars */
+  .gantt-container ._2TEZW {
+    border-radius: 4px;
+  }
+
+  /* Task bar hover and click for dependency mode */
+  .gantt-container [class*="task-item"] {
+    cursor: pointer;
+  }
+
+  .gantt-container [class*="task-item"]:hover {
+    opacity: 0.9;
+    filter: brightness(1.1);
+  }
+
+  /* Scrollbars */
+  .gantt-container::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  .gantt-container::-webkit-scrollbar-track {
+    background: hsl(var(--surface));
+  }
+
+  .gantt-container::-webkit-scrollbar-thumb {
+    background: hsl(var(--border));
+    border-radius: 5px;
+  }
+
+  .gantt-container::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted));
+  }
+
+  /* Tiptap Editor Styling */
+  .ProseMirror {
+    color: hsl(var(--foreground));
+  }
+
+  .ProseMirror p.is-editor-empty:first-child::before {
+    color: hsl(var(--muted-foreground));
+    content: attr(data-placeholder);
+    float: left;
+    height: 0;
+    pointer-events: none;
+  }
+
+  .ProseMirror h1 {
+    font-size: 1.875rem;
+    font-weight: 700;
+    line-height: 2.25rem;
+    margin-top: 1.5rem;
+    margin-bottom: 0.75rem;
+    color: hsl(var(--foreground));
+  }
+
+  .ProseMirror h2 {
+    font-size: 1.5rem;
+    font-weight: 600;
+    line-height: 2rem;
+    margin-top: 1.25rem;
+    margin-bottom: 0.625rem;
+    color: hsl(var(--foreground));
+  }
+
+  .ProseMirror h3 {
+    font-size: 1.25rem;
+    font-weight: 600;
+    line-height: 1.75rem;
+    margin-top: 1rem;
+    margin-bottom: 0.5rem;
+    color: hsl(var(--foreground));
+  }
+
+  .ProseMirror p {
+    margin-top: 0.5rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .ProseMirror ul,
+  .ProseMirror ol {
+    padding-left: 1.5rem;
+    margin-top: 0.5rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .ProseMirror ul {
+    list-style-type: disc;
+  }
+
+  .ProseMirror ol {
+    list-style-type: decimal;
+  }
+
+  .ProseMirror li {
+    margin-top: 0.25rem;
+    margin-bottom: 0.25rem;
+  }
+
+  .ProseMirror code {
+    background-color: hsl(var(--muted));
+    color: hsl(var(--foreground));
+    padding: 0.125rem 0.25rem;
+    border-radius: 0.25rem;
+    font-size: 0.875em;
+    font-family: monospace;
+  }
+
+  .ProseMirror pre {
+    background-color: hsl(var(--muted));
+    color: hsl(var(--foreground));
+    font-family: monospace;
+    padding: 0.75rem 1rem;
+    border-radius: 0.5rem;
+    margin-top: 0.5rem;
+    margin-bottom: 0.5rem;
+    overflow-x: auto;
+  }
+
+  .ProseMirror blockquote {
+    border-left: 4px solid hsl(var(--primary));
+    padding-left: 1rem;
+    margin-left: 0;
+    margin-top: 0.5rem;
+    margin-bottom: 0.5rem;
+    color: hsl(var(--muted-foreground));
+    font-style: italic;
+  }
+
+  .ProseMirror strong {
+    font-weight: 700;
+  }
+
+  .ProseMirror em {
+    font-style: italic;
+  }
+
+  .ProseMirror:focus {
+    outline: none;
+  }
+
+  .mention {
+    background-color: hsl(var(--primary) / 0.2);
+    color: hsl(var(--primary));
+    padding: 0.125rem 0.25rem;
+    border-radius: 0.25rem;
+    font-weight: 500;
+  }
+}
