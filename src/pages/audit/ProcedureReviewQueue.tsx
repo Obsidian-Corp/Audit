@@ -1,11 +1,13 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useEngagementProcedures } from '@/hooks/useEngagementProcedures';
-import { AlertCircle, Clock, Search, User } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Clock, Search, User } from 'lucide-react';
 import { format } from 'date-fns';
 import { ProcedureReviewPanel } from '@/components/audit/programs/ProcedureReviewPanel';
 
@@ -50,11 +52,51 @@ export default function ProcedureReviewQueue() {
     setReviewPanelOpen(true);
   };
 
+  const navigate = useNavigate();
+
   if (isLoading) {
     return (
-      <div className="container mx-auto py-6">
-        <div className="flex items-center justify-center h-64">
-          <div className="text-muted-foreground">Loading review queue...</div>
+      <div className="container mx-auto py-6 space-y-6">
+        <div>
+          <Skeleton className="h-9 w-72 mb-2" />
+          <Skeleton className="h-5 w-96" />
+        </div>
+        {/* Stats skeleton */}
+        <div className="grid gap-4 md:grid-cols-4">
+          {[1, 2, 3, 4].map((i) => (
+            <Card key={i}>
+              <CardHeader className="pb-2">
+                <Skeleton className="h-4 w-24 mb-2" />
+                <Skeleton className="h-8 w-16" />
+              </CardHeader>
+            </Card>
+          ))}
+        </div>
+        {/* Filter skeleton */}
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex gap-4">
+              <Skeleton className="h-10 flex-1" />
+              <Skeleton className="h-10 w-[200px]" />
+            </div>
+          </CardContent>
+        </Card>
+        {/* Queue skeleton */}
+        <div className="space-y-4">
+          {[1, 2, 3].map((i) => (
+            <Card key={i}>
+              <CardContent className="p-6">
+                <div className="flex items-start justify-between">
+                  <div className="flex-1 space-y-3">
+                    <Skeleton className="h-6 w-64" />
+                    <Skeleton className="h-4 w-96" />
+                    <Skeleton className="h-4 w-48" />
+                  </div>
+                  <Skeleton className="h-10 w-20" />
+                </div>
+              </CardContent>
+            </Card>
+          ))}
         </div>
       </div>
     );
@@ -149,7 +191,14 @@ export default function ProcedureReviewQueue() {
         {filteredProcedures.length === 0 ? (
           <Card>
             <CardContent className="py-12 text-center">
-              <p className="text-muted-foreground">No procedures awaiting review</p>
+              <CheckCircle2 className="h-12 w-12 mx-auto mb-4 text-muted-foreground/30" />
+              <h3 className="text-lg font-medium mb-2">All Caught Up!</h3>
+              <p className="text-muted-foreground mb-4">
+                No procedures awaiting your review
+              </p>
+              <Button variant="outline" onClick={() => navigate('/my-procedures')}>
+                View My Procedures
+              </Button>
             </CardContent>
           </Card>
         ) : (

@@ -922,7 +922,8 @@ USING (
 
 -- Create storage bucket for project files
 INSERT INTO storage.buckets (id, name, public)
-VALUES ('project-files', 'project-files', false);
+VALUES ('project-files', 'project-files', false)
+ON CONFLICT (id) DO NOTHING;
 
 -- Storage RLS policies
 CREATE POLICY "Project owners can upload files"

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useOrganization } from '@/contexts/OrganizationContext';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
@@ -15,6 +15,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { FileText } from 'lucide-react';
 import {
   Select,
   SelectContent,
@@ -23,13 +25,20 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 
+interface ProcedureContext {
+  procedureId?: string;
+  procedureName?: string;
+  auditId?: string;
+}
+
 interface CreateFindingDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSuccess: () => void;
+  procedureContext?: ProcedureContext;
 }
 
-export function CreateFindingDialog({ open, onOpenChange, onSuccess }: CreateFindingDialogProps) {
+export function CreateFindingDialog({ open, onOpenChange, onSuccess, procedureContext }: CreateFindingDialogProps) {
   const { currentOrg } = useOrganization();
   const { toast } = useToast();
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -62,6 +71,22 @@ export function CreateFindingDialog({ open, onOpenChange, onSuccess }: CreateFin
     recommendation: '',
     target_completion_date: ''
   });
+
+  // Pre-populate from procedure context
+  useEffect(() => {
+    if (procedureContext?.auditId) {
+      setFormData(prev => ({
+        ...prev,
+        audit_id: procedureContext.auditId || prev.audit_id,
+      }));
+    }
+    if (procedureContext?.procedureName) {
+      setFormData(prev => ({
+        ...prev,
+        condition_description: `Finding identified during procedure: ${procedureContext.procedureName}\n\n`,
+      }));
+    }
+  }, [procedureContext]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -112,6 +137,14 @@ export function CreateFindingDialog({ open, onOpenChange, onSuccess }: CreateFin
         </DialogHeader>
         <form onSubmit={handleSubmit}>
           <div className="grid gap-4 py-4">
+            {procedureContext?.procedureName && (
+              <Alert>
+                <FileText className="h-4 w-4" />
+                <AlertDescription>
+                  Creating finding from procedure: <strong>{procedureContext.procedureName}</strong>
+                </AlertDescription>
+              </Alert>
+            )}
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="finding_number">Finding Number *</Label>

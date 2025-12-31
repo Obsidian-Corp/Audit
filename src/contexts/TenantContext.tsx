@@ -5,7 +5,7 @@
  */
 
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { supabase } from '@/lib/supabase';
+import { supabase, isSupabaseConfigured } from '@/integrations/supabase/client';
 import {
   detectTenantFromHostname,
   applyFirmBranding,
@@ -59,8 +59,8 @@ export function TenantProvider({ children }: { children: ReactNode }) {
     try {
       const detection = detectTenantFromHostname();
 
-      // For localhost development, skip tenant lookup
-      if (detection.isLocalhost) {
+      // For localhost development or unconfigured Supabase, skip tenant lookup
+      if (detection.isLocalhost || !isSupabaseConfigured) {
         setTenantInfo({
           firmId: null,
           firmSlug: null,

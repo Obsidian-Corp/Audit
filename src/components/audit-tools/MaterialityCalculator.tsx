@@ -21,8 +21,7 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import {
   useMaterialityCalculation,
-  useSaveMateriality,
-  useIndustryGuidance,
+  useCreateMaterialityCalculation,
   useMaterialityHistory,
   useApproveMateriality,
 } from '@/hooks/useMateriality';
@@ -40,10 +39,10 @@ import {
 import { formatDistanceToNow } from 'date-fns';
 
 interface MaterialityCalculatorProps {
-  engagementId: string;
-  firmId: string;
+  engagementId?: string;
+  firmId?: string;
   industry?: string;
-  clientName: string;
+  clientName?: string;
 }
 
 const BENCHMARK_TYPES: { value: BenchmarkType; label: string }[] = [
@@ -78,7 +77,7 @@ export function MaterialityCalculator({
 }: MaterialityCalculatorProps) {
   const { data: currentMateriality, isLoading } = useMaterialityCalculation(engagementId);
   const { data: history } = useMaterialityHistory(engagementId);
-  const saveMateriality = useSaveMateriality();
+  const saveMateriality = useCreateMaterialityCalculation();
   const approveMateriality = useApproveMateriality();
 
   // Form state
@@ -100,10 +99,8 @@ export function MaterialityCalculator({
   });
 
   // Get industry guidance
-  const { data: guidance } = useIndustryGuidance(
-    formData.industry || 'other',
-    formData.benchmark_type
-  );
+  // TODO: Implement useIndustryGuidance hook
+  const guidance = null;
 
   // Load existing materiality if available
   useEffect(() => {

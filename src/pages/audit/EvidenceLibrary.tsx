@@ -34,13 +34,13 @@ interface Evidence {
   file_size: number;
   tags: string[];
   uploaded_at: string;
-  uploaded_by: {
+  uploader: {
     full_name: string;
-  };
-  audits: {
+  } | null;
+  audit: {
     audit_number: string;
     audit_title: string;
-  };
+  } | null;
 }
 
 export default function EvidenceLibrary() {
@@ -56,23 +56,42 @@ export default function EvidenceLibrary() {
     queryFn: async () => {
       if (!currentOrg) return [];
       const { data, error } = await supabase
-        .from('audit_documents')
+        .from('engagement_documents')
         .select(`
           id,
           document_name,
           document_type,
-          file_path,
+          file_url,
           file_size,
           tags,
           uploaded_at,
-          uploaded_by:profiles!audit_documents_uploaded_by_fkey(full_name),
-          audits!inner(audit_number, audit_title, firm_id)
+          uploaded_by,
+          engagement_id
         `)
-        .eq('audits.firm_id', currentOrg.id)
+        .eq('firm_id', currentOrg.id)
         .order('uploaded_at', { ascending: false });
 
-      if (error) throw error;
-      return data as Evidence[];
+      if (error) {
+        console.error('Error fetching engagement_documents:', error);
+        throw error;
+      }
+
+      // Fetch audit info for each document
+      const engagementIds = [...new Set(data?.map(d => d.engagement_id).filter(Boolean))];
+      const { data: auditsData } = await supabase
+        .from('audits')
+        .select('id, audit_number, audit_title')
+        .in('id', engagementIds);
+
+      const auditsMap = new Map(auditsData?.map(a => [a.id, a]) || []);
+
+      // Map the data
+      return (data || []).map(doc => ({
+        ...doc,
+        file_path: doc.file_url,
+        uploader: null,
+        audit: auditsMap.get(doc.engagement_id) || null
+      })) as Evidence[];
     },
     enabled: !!currentOrg,
   });
@@ -93,9 +112,9 @@ export default function EvidenceLibrary() {
 
   const filteredEvidence = evidence?.filter(doc => {
     const matchesSearch = doc.document_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      doc.audits?.audit_number?.toLowerCase().includes(searchTerm.toLowerCase());
+      doc.audit?.audit_number?.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesType = typeFilter === 'all' || doc.document_type === typeFilter;
-    const matchesEngagement = engagementFilter === 'all' || doc.audits?.audit_number === engagementFilter;
+    const matchesEngagement = engagementFilter === 'all' || doc.audit?.audit_number === engagementFilter;
     return matchesSearch && matchesType && matchesEngagement;
   }) || [];
 
@@ -296,9 +315,9 @@ export default function EvidenceLibrary() {
                         )}
                       </div>
                       <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                        <span>{doc.audits?.audit_number} - {doc.audits?.audit_title}</span>
+                        <span>{doc.audit?.audit_number} - {doc.audit?.audit_title}</span>
                         <span>•</span>
-                        <span>Uploaded by {doc.uploaded_by.full_name}</span>
+                        <span>Uploaded by {doc.uploader?.full_name || 'Unknown'}</span>
                         <span>•</span>
                         <span>{format(new Date(doc.uploaded_at), 'MMM d, yyyy')}</span>
                         <span>•</span>

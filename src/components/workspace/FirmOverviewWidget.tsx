@@ -16,37 +16,39 @@ import { AlertTriangle, TrendingUp, Users, Briefcase, ArrowRight } from 'lucide-
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
+import { useNavigate } from 'react-router-dom';
 
 export function FirmOverviewWidget() {
-  const { user } = useAuth();
+  const { profile } = useAuth();
+  const navigate = useNavigate();
 
   // Fetch firm-wide engagement stats
   const { data: engagementHealth, isLoading: engagementLoading } = useQuery({
-    queryKey: ['firm-engagement-health', user?.firm_id],
+    queryKey: ['firm-engagement-health', profile?.firm_id],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('audits')
-        .select('id, status, budgeted_hours, hours_spent')
-        .eq('firm_id', user?.firm_id)
+        .select('id, status, budget_hours, hours_spent')
+        .eq('firm_id', profile?.firm_id)
         .in('status', ['planning', 'fieldwork', 'review', 'in_progress', 'active']);
 
       if (error) throw error;
 
       const atRisk = data.filter((e) => {
-        const budgetHours = e.budgeted_hours || 0;
+        const budgetHours = e.budget_hours || 0;
         const hoursSpent = e.hours_spent || 0;
         return budgetHours > 0 && (hoursSpent / budgetHours) * 100 > 90;
       }).length;
 
       const onTrack = data.filter((e) => {
-        const budgetHours = e.budgeted_hours || 0;
+        const budgetHours = e.budget_hours || 0;
         const hoursSpent = e.hours_spent || 0;
         const percent = budgetHours > 0 ? (hoursSpent / budgetHours) * 100 : 0;
         return percent >= 50 && percent <= 90;
       }).length;
 
       const ahead = data.filter((e) => {
-        const budgetHours = e.budgeted_hours || 0;
+        const budgetHours = e.budget_hours || 0;
         const hoursSpent = e.hours_spent || 0;
         const percent = budgetHours > 0 ? (hoursSpent / budgetHours) * 100 : 0;
         return percent < 50;
@@ -59,12 +61,12 @@ export function FirmOverviewWidget() {
         ahead,
       };
     },
-    enabled: !!user?.firm_id,
+    enabled: !!profile?.firm_id,
   });
 
   // Fetch team capacity (simulated - would come from resource planning tables)
   const { data: teamCapacity, isLoading: capacityLoading } = useQuery({
-    queryKey: ['firm-team-capacity', user?.firm_id],
+    queryKey: ['firm-team-capacity', profile?.firm_id],
     queryFn: async () => {
       // TODO: Replace with actual capacity calculation from resource planning
       return {
@@ -73,7 +75,7 @@ export function FirmOverviewWidget() {
         overallocated: 2,
       };
     },
-    enabled: !!user?.firm_id,
+    enabled: !!profile?.firm_id,
   });
 
   if (engagementLoading || capacityLoading) {
@@ -198,7 +200,12 @@ export function FirmOverviewWidget() {
               </div>
 
               {/* Action Button */}
-              <Button variant="outline" size="sm" className="w-full mt-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full mt-2"
+                onClick={() => navigate('/engagements')}
+              >
                 View All Engagements
                 <ArrowRight className="ml-2 h-4 w-4" />
               </Button>

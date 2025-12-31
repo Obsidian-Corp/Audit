@@ -3,12 +3,21 @@ import { Navigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { Loader2 } from 'lucide-react';
 
+// DEMO MODE: Set to true to bypass authentication
+// TODO: Set to false for production
+const DEMO_MODE = false;
+
 interface RequireAuthProps {
   children: ReactNode;
 }
 
 export function RequireAuth({ children }: RequireAuthProps) {
   const { user, isLoading } = useAuth();
+
+  // DEMO MODE: Skip auth check entirely
+  if (DEMO_MODE) {
+    return <>{children}</>;
+  }
 
   if (isLoading) {
     return (

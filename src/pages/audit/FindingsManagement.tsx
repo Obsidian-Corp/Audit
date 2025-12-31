@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useSearchParams } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -10,13 +11,30 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Badge } from '@/components/ui/badge';
 import { CreateFindingDialog } from '@/components/audit/findings/CreateFindingDialog';
 import { format } from 'date-fns';
-import { Breadcrumbs } from '@/components/ui/breadcrumbs';
 
 export default function FindingsManagement() {
   const { currentFirm } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [searchTerm, setSearchTerm] = useState('');
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>('all');
+
+  // Pre-populated context from URL params (when coming from procedure)
+  const procedureContext = {
+    procedureId: searchParams.get('procedureId') || undefined,
+    procedureName: searchParams.get('procedureName') || undefined,
+    auditId: searchParams.get('auditId') || undefined,
+  };
+
+  // Auto-open create dialog if ?create=true is in URL
+  useEffect(() => {
+    if (searchParams.get('create') === 'true') {
+      setShowCreateDialog(true);
+      // Clean up URL
+      searchParams.delete('create');
+      setSearchParams(searchParams, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   const { data: findings, isLoading, refetch } = useQuery({
     queryKey: ['audit-findings', currentFirm?.id, statusFilter],
@@ -79,11 +97,6 @@ export default function FindingsManagement() {
   return (
     <div className="min-h-screen bg-background">
       <div className="container mx-auto p-6 md:p-8 space-y-6">
-        <Breadcrumbs items={[
-          { label: 'Dashboard', href: '/dashboard' },
-          { label: 'Findings' }
-        ]} />
-        
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div className="space-y-1">
             <h1 className="text-3xl font-bold text-foreground tracking-tight">
@@ -272,6 +285,7 @@ export default function FindingsManagement() {
           open={showCreateDialog}
           onOpenChange={setShowCreateDialog}
           onSuccess={refetch}
+          procedureContext={procedureContext}
         />
       </div>
     </div>

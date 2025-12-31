@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { User, Session } from '@supabase/supabase-js';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase, isSupabaseConfigured } from '@/integrations/supabase/client';
 import { Database } from '@/integrations/supabase/types';
 
 type AppRole = Database['public']['Enums']['app_role'];
@@ -13,6 +13,8 @@ interface AuthContextType {
   profile: Profile | null;
   roles: AppRole[];
   currentOrganization: Organization | null;
+  /** @deprecated Use currentOrganization instead */
+  currentFirm: Organization | null;
   organizationId: string | null;
   isLoading: boolean;
   signIn: (email: string, password: string) => Promise<{ error: any }>;
@@ -36,31 +38,58 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Fetch user profile and roles
   const fetchUserData = async (userId: string) => {
     try {
-      // Fetch profile
+      // Fetch profile first
       const { data: profileData, error: profileError } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', userId)
         .single();
 
-      if (profileError) throw profileError;
-      setProfile(profileData);
+      if (profileError) {
+        console.error('Error fetching profile:', profileError);
+        // Don't throw - continue with null profile
+      }
+      setProfile(profileData || null);
 
-      // Fetch roles
+      // Get firm_id from profile or try to find it from user_roles
+      const firmId = profileData?.firm_id || '00000000-0000-0000-0000-000000000001';
+
+      // Fetch roles using RPC function (uses SECURITY DEFINER to bypass RLS)
+      // This avoids the infinite recursion issue with direct table access
       const { data: rolesData, error: rolesError } = await supabase
-        .from('user_roles')
-        .select('role')
-        .eq('user_id', userId);
+        .rpc('get_user_roles', {
+          _user_id: userId,
+          _firm_id: firmId
+        });
 
-      if (rolesError) throw rolesError;
-      setRoles(rolesData?.map(r => r.role as AppRole) || []);
+      if (rolesError) {
+        console.error('Error fetching roles via RPC:', rolesError);
+        // Fallback: try direct query (may fail due to RLS)
+        const { data: directRoles, error: directError } = await supabase
+          .from('user_roles')
+          .select('role')
+          .eq('user_id', userId);
+
+        if (directError) {
+          console.error('Error fetching roles directly:', directError);
+          setRoles([]);
+        } else {
+          setRoles(directRoles?.map(r => r.role as AppRole) || []);
+        }
+      } else {
+        // RPC returns array of { role: string }
+        const rolesList = Array.isArray(rolesData)
+          ? rolesData.map(r => (typeof r === 'string' ? r : r.role) as AppRole)
+          : [];
+        setRoles(rolesList);
+      }
 
       // Fetch organization
-      if (profileData?.firm_id) {
+      if (firmId) {
         const { data: orgData, error: orgError } = await supabase
           .from('firms') // Note: table is still called 'firms' in database
           .select('*')
-          .eq('id', profileData.firm_id)
+          .eq('id', firmId)
           .single();
 
         if (!orgError && orgData) {
@@ -74,6 +103,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
+    // If Supabase is not configured, skip auth initialization
+    if (!isSupabaseConfigured) {
+      console.warn('Supabase not configured - running in unauthenticated mode');
+      setIsLoading(false);
+      return;
+    }
+
     // CRITICAL: Do not fetch user data if on platform admin routes
     // Platform admins use a separate auth system (platform_admin.admin_users)
     const isPlatformAdmin = window.location.pathname.startsWith('/platform-admin');
@@ -176,6 +212,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     profile,
     roles,
     currentOrganization,
+    currentFirm: currentOrganization, // Alias for backward compatibility
     organizationId,
     isLoading,
     signIn,

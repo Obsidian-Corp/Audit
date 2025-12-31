@@ -1,2 +1,2 @@
 // Product Database Client (Re-export for convenience)
-export { supabase } from '@/integrations/supabase/client';
+export { supabase, isSupabaseConfigured } from '@/integrations/supabase/client';

@@ -1,0 +1,156 @@
+-- =====================================================================
+-- MIGRATION: Create workpaper_references table
+-- Ticket: DB-004
+-- Purpose: Track cross-references between workpapers and other entities
+--          (evidence, findings, procedures, external sources)
+-- =====================================================================
+
+-- Create the workpaper_references table
+CREATE TABLE IF NOT EXISTS public.workpaper_references (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+  -- Source workpaper
+  source_workpaper_id UUID NOT NULL REFERENCES public.audit_workpapers(id) ON DELETE CASCADE,
+  source_location TEXT, -- Location in source document (e.g., "section-2", "line-45")
+
+  -- Target reference
+  target_type VARCHAR(50) NOT NULL CHECK (target_type IN ('workpaper', 'evidence', 'finding', 'procedure', 'external')),
+  target_id UUID, -- NULL if external
+  target_reference TEXT NOT NULL, -- Human-readable reference (e.g., "WP-A-1", "https://...")
+
+  -- Reference context
+  reference_text TEXT, -- The actual text that contains the reference
+
+  -- Auto-detection support
+  is_auto_detected BOOLEAN DEFAULT FALSE,
+  is_verified BOOLEAN DEFAULT FALSE,
+
+  -- Audit trail
+  created_by UUID REFERENCES auth.users(id),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Create indexes for common queries
+CREATE INDEX IF NOT EXISTS idx_workpaper_refs_source
+  ON public.workpaper_references(source_workpaper_id);
+
+CREATE INDEX IF NOT EXISTS idx_workpaper_refs_target
+  ON public.workpaper_references(target_type, target_id);
+
+CREATE INDEX IF NOT EXISTS idx_workpaper_refs_type
+  ON public.workpaper_references(target_type);
+
+CREATE INDEX IF NOT EXISTS idx_workpaper_refs_unverified
+  ON public.workpaper_references(is_auto_detected, is_verified)
+  WHERE is_auto_detected = TRUE AND is_verified = FALSE;
+
+-- Enable Row Level Security
+ALTER TABLE public.workpaper_references ENABLE ROW LEVEL SECURITY;
+
+-- RLS Policy: Users can view references for workpapers in their firm
+CREATE POLICY "Users can view references in their firm"
+  ON public.workpaper_references
+  FOR SELECT
+  TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1
+      FROM public.audit_workpapers wp
+      JOIN public.audits a ON a.id = wp.audit_id
+      WHERE wp.id = workpaper_references.source_workpaper_id
+      AND a.firm_id = public.user_firm_id(auth.uid())
+    )
+  );
+
+-- RLS Policy: Users can create references for workpapers in their firm
+CREATE POLICY "Users can create references in their firm"
+  ON public.workpaper_references
+  FOR INSERT
+  TO authenticated
+  WITH CHECK (
+    EXISTS (
+      SELECT 1
+      FROM public.audit_workpapers wp
+      JOIN public.audits a ON a.id = wp.audit_id
+      WHERE wp.id = source_workpaper_id
+      AND a.firm_id = public.user_firm_id(auth.uid())
+    )
+  );
+
+-- RLS Policy: Users can update references in their firm
+CREATE POLICY "Users can update references in their firm"
+  ON public.workpaper_references
+  FOR UPDATE
+  TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1
+      FROM public.audit_workpapers wp
+      JOIN public.audits a ON a.id = wp.audit_id
+      WHERE wp.id = workpaper_references.source_workpaper_id
+      AND a.firm_id = public.user_firm_id(auth.uid())
+    )
+  );
+
+-- RLS Policy: Users can delete references in their firm
+CREATE POLICY "Users can delete references in their firm"
+  ON public.workpaper_references
+  FOR DELETE
+  TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1
+      FROM public.audit_workpapers wp
+      JOIN public.audits a ON a.id = wp.audit_id
+      WHERE wp.id = workpaper_references.source_workpaper_id
+      AND a.firm_id = public.user_firm_id(auth.uid())
+    )
+  );
+
+-- Trigger: Update updated_at timestamp
+CREATE OR REPLACE FUNCTION update_workpaper_references_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at := NOW();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trigger_update_workpaper_references_updated_at
+  BEFORE UPDATE ON public.workpaper_references
+  FOR EACH ROW
+  EXECUTE FUNCTION update_workpaper_references_updated_at();
+
+-- View: References by workpaper with target details
+CREATE OR REPLACE VIEW public.workpaper_references_with_details AS
+SELECT
+  r.*,
+  -- Source workpaper details
+  sw.title as source_workpaper_title,
+  sw.reference_number as source_reference_number,
+  -- Target workpaper details (if applicable)
+  tw.title as target_workpaper_title,
+  tw.reference_number as target_reference_number,
+  -- Target finding details (if applicable)
+  f.title as target_finding_title,
+  -- Target procedure details (if applicable)
+  p.name as target_procedure_name
+FROM public.workpaper_references r
+LEFT JOIN public.audit_workpapers sw ON sw.id = r.source_workpaper_id
+LEFT JOIN public.audit_workpapers tw ON r.target_type = 'workpaper' AND tw.id = r.target_id
+LEFT JOIN public.audit_findings f ON r.target_type = 'finding' AND f.id = r.target_id
+LEFT JOIN public.audit_procedures p ON r.target_type = 'procedure' AND p.id = r.target_id;
+
+-- Add comments for documentation
+COMMENT ON TABLE public.workpaper_references IS 'Cross-references between workpapers and other entities (evidence, findings, procedures, external sources)';
+COMMENT ON COLUMN public.workpaper_references.source_location IS 'Location within the source workpaper where the reference appears';
+COMMENT ON COLUMN public.workpaper_references.target_reference IS 'Human-readable reference string (e.g., "WP-A-1", "EV-001", URL)';
+COMMENT ON COLUMN public.workpaper_references.is_auto_detected IS 'Whether this reference was automatically detected by the system';
+COMMENT ON COLUMN public.workpaper_references.is_verified IS 'Whether an auto-detected reference has been verified by a user';
+
+-- Success message
+DO $$
+BEGIN
+  RAISE NOTICE '✅ DB-004: workpaper_references table created successfully';
+END $$;

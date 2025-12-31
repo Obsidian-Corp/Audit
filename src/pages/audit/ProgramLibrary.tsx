@@ -63,7 +63,7 @@ export default function ProgramLibrary() {
           variant="outline"
           size="sm"
           className="flex-1"
-          onClick={() => navigate(`/audit/programs/${program.id}`)}
+          onClick={() => navigate(`/programs/${program.id}`)}
         >
           <Eye className="h-4 w-4 mr-1" />
           View Details

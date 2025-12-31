@@ -1,0 +1,1006 @@
+-- =====================================================
+-- OBSIDIAN AUDIT PLATFORM - PROFESSIONAL STANDARDS PHASE 3
+-- Internal Controls (COSO), EQCR, Going Concern, Related Parties
+-- Standards: AU-C 315/330/265, PCAOB AS 2201, ISA 315/330/265
+--            AU-C 570, ISA 570 (Going Concern)
+--            AU-C 550, ISA 550 (Related Parties)
+--            ISQM 2, PCAOB AS 1220 (EQCR)
+-- =====================================================
+
+-- =====================================================
+-- PART 1: INTERNAL CONTROLS FRAMEWORK (COSO)
+-- =====================================================
+
+-- Internal Controls Register
+CREATE TABLE IF NOT EXISTS internal_controls (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  engagement_id UUID NOT NULL,
+  firm_id UUID NOT NULL,
+
+  -- Control Identification
+  control_id TEXT NOT NULL, -- User-defined ID like "REV-001", "AP-003"
+  control_name TEXT NOT NULL,
+  control_description TEXT NOT NULL,
+
+  -- Classification
+  control_type TEXT NOT NULL, -- 'preventive', 'detective', 'corrective'
+  control_nature TEXT NOT NULL, -- 'manual', 'automated', 'it_dependent_manual'
+  control_frequency TEXT NOT NULL, -- 'continuous', 'daily', 'weekly', 'monthly', 'quarterly', 'annual', 'ad_hoc'
+  control_level TEXT NOT NULL, -- 'entity_level', 'process_level', 'transaction_level'
+
+  -- COSO Framework Mapping
+  coso_component TEXT NOT NULL,
+  -- 'control_environment', 'risk_assessment', 'control_activities',
+  -- 'information_communication', 'monitoring'
+  coso_principle INTEGER, -- 1-17 COSO principles
+
+  -- Process Mapping
+  business_process TEXT NOT NULL,
+  -- 'revenue', 'purchasing', 'payroll', 'treasury', 'financial_close',
+  -- 'inventory', 'fixed_assets', 'investments', 'it_general'
+  sub_process TEXT,
+  transaction_class TEXT,
+
+  -- Account/Assertion Mapping
+  related_accounts TEXT[],
+  assertions_addressed TEXT[],
+  -- 'existence', 'occurrence', 'completeness', 'accuracy', 'valuation',
+  -- 'cutoff', 'rights_obligations', 'classification', 'presentation'
+
+  -- Risk Linkage
+  related_risk_ids UUID[],
+  addresses_significant_risk BOOLEAN DEFAULT false,
+  addresses_fraud_risk BOOLEAN DEFAULT false,
+
+  -- Control Owner
+  control_owner TEXT,
+  control_owner_title TEXT,
+  control_owner_user_id UUID REFERENCES auth.users(id),
+
+  -- Key Control Designation
+  is_key_control BOOLEAN DEFAULT false,
+  key_control_rationale TEXT,
+  is_compensating_control BOOLEAN DEFAULT false,
+  compensates_for_control_id UUID REFERENCES internal_controls(id),
+
+  -- IT Dependencies
+  it_application TEXT,
+  it_system TEXT,
+  depends_on_itgc BOOLEAN DEFAULT false,
+  itgc_dependencies TEXT[],
+
+  -- Control Documentation
+  control_documentation TEXT, -- Where is control documented
+  source_documents TEXT[], -- What documents support the control
+
+  -- Status
+  status TEXT DEFAULT 'identified',
+  -- 'identified', 'documented', 'designed', 'implemented', 'tested', 'effective', 'deficient'
+
+  created_by UUID REFERENCES auth.users(id),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+
+  CONSTRAINT unique_control_id UNIQUE(engagement_id, control_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_controls_engagement ON internal_controls(engagement_id);
+CREATE INDEX IF NOT EXISTS idx_controls_firm ON internal_controls(firm_id);
+CREATE INDEX IF NOT EXISTS idx_controls_process ON internal_controls(business_process);
+CREATE INDEX IF NOT EXISTS idx_controls_coso ON internal_controls(coso_component);
+CREATE INDEX IF NOT EXISTS idx_controls_key ON internal_controls(is_key_control) WHERE is_key_control = true;
+
+-- Control Walkthroughs
+CREATE TABLE IF NOT EXISTS control_walkthroughs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  control_id UUID NOT NULL REFERENCES internal_controls(id),
+  engagement_id UUID NOT NULL,
+  firm_id UUID NOT NULL,
+
+  -- Walkthrough Details
+  walkthrough_date DATE NOT NULL,
+  performed_by UUID REFERENCES auth.users(id),
+
+  -- Transaction Selected
+  transaction_description TEXT NOT NULL,
+  transaction_date DATE,
+  transaction_amount DECIMAL,
+  transaction_reference TEXT,
+
+  -- Process Steps (Following the transaction through the system)
+  process_steps JSONB NOT NULL DEFAULT '[]',
+  /*
+  Array of {
+    step_number: integer,
+    description: string,
+    person_responsible: string,
+    department: string,
+    document_or_system: string,
+    control_point: boolean,
+    control_description: string,
+    evidence_obtained: string
+  }
+  */
+
+  -- Evidence Gathering Methods
+  inquiry_performed BOOLEAN DEFAULT false,
+  inquiry_with TEXT,
+  inquiry_details TEXT,
+
+  observation_performed BOOLEAN DEFAULT false,
+  observation_details TEXT,
+
+  inspection_performed BOOLEAN DEFAULT false,
+  documents_inspected TEXT,
+  inspection_details TEXT,
+
+  reperformance_performed BOOLEAN DEFAULT false,
+  reperformance_details TEXT,
+
+  -- WCGW Analysis (What Could Go Wrong)
+  wcgw_analysis JSONB DEFAULT '[]',
+  /*
+  Array of {
+    risk_description: string,
+    assertion_affected: string,
+    existing_control: string,
+    control_adequate: boolean,
+    residual_risk: string,
+    additional_procedures_needed: string
+  }
+  */
+
+  -- Design Evaluation
+  design_effective BOOLEAN,
+  design_issues TEXT,
+
+  -- Implementation Confirmation
+  implementation_confirmed BOOLEAN,
+  implementation_issues TEXT,
+
+  -- Overall Conclusion
+  walkthrough_conclusion TEXT, -- 'design_effective', 'design_needs_improvement', 'not_implemented'
+
+  -- Evidence References
+  evidence_document_ids UUID[],
+
+  -- Review
+  reviewed_by UUID REFERENCES auth.users(id),
+  reviewed_at TIMESTAMPTZ,
+  review_notes TEXT,
+
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_walkthroughs_control ON control_walkthroughs(control_id);
+CREATE INDEX IF NOT EXISTS idx_walkthroughs_engagement ON control_walkthroughs(engagement_id);
+
+-- Control Test Results
+CREATE TABLE IF NOT EXISTS control_test_results (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  control_id UUID NOT NULL REFERENCES internal_controls(id),
+  engagement_id UUID NOT NULL,
+  firm_id UUID NOT NULL,
+
+  -- Test Details
+  test_type TEXT NOT NULL, -- 'design', 'operating_effectiveness', 'both'
+  test_approach TEXT NOT NULL, -- 'inquiry', 'observation', 'inspection', 'reperformance'
+  test_period_start DATE,
+  test_period_end DATE,
+
+  -- Population & Sample
+  population_description TEXT,
+  population_size INTEGER,
+  sample_size INTEGER,
+  sample_selection_method TEXT, -- 'random', 'haphazard', 'systematic', 'judgmental', 'all_items'
+  sample_selection_rationale TEXT,
+
+  -- Sample Size Determination
+  expected_deviation_rate DECIMAL,
+  tolerable_deviation_rate DECIMAL,
+  confidence_level DECIMAL,
+
+  -- Test Procedures
+  test_procedures_performed TEXT NOT NULL,
+  test_attributes TEXT[], -- What attributes are being tested
+
+  -- Results
+  items_tested INTEGER NOT NULL,
+  items_with_no_exception INTEGER NOT NULL,
+  exceptions_found INTEGER NOT NULL DEFAULT 0,
+
+  -- Exception Details
+  exception_details JSONB DEFAULT '[]',
+  /*
+  Array of {
+    item_reference: string,
+    item_date: date,
+    item_amount: decimal,
+    exception_description: string,
+    root_cause: string,
+    isolated_or_systemic: string,
+    management_response: string
+  }
+  */
+
+  -- Deviation Rate
+  sample_deviation_rate DECIMAL,
+  projected_deviation_rate DECIMAL,
+
+  -- Conclusion
+  test_conclusion TEXT NOT NULL,
+  -- 'effective', 'effective_with_minor_exceptions', 'not_effective', 'unable_to_test'
+  conclusion_rationale TEXT,
+
+  -- Impact Assessment
+  control_reliance_planned BOOLEAN,
+  actual_reliance TEXT, -- 'rely_as_planned', 'partial_reliance', 'no_reliance'
+  reliance_rationale TEXT,
+
+  -- Impact on Substantive Procedures
+  substantive_procedure_impact TEXT,
+  -- 'no_change', 'increase_extent', 'change_nature', 'change_timing'
+  additional_substantive_procedures TEXT,
+
+  -- Sign-offs
+  performed_by UUID REFERENCES auth.users(id),
+  performed_at TIMESTAMPTZ,
+  reviewed_by UUID REFERENCES auth.users(id),
+  reviewed_at TIMESTAMPTZ,
+
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_test_results_control ON control_test_results(control_id);
+CREATE INDEX IF NOT EXISTS idx_test_results_engagement ON control_test_results(engagement_id);
+CREATE INDEX IF NOT EXISTS idx_test_results_conclusion ON control_test_results(test_conclusion);
+
+-- Control Deficiencies
+CREATE TABLE IF NOT EXISTS control_deficiencies (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  engagement_id UUID NOT NULL,
+  firm_id UUID NOT NULL,
+  control_id UUID REFERENCES internal_controls(id),
+  test_result_id UUID REFERENCES control_test_results(id),
+
+  -- Deficiency Identification
+  deficiency_reference TEXT, -- "CD-001"
+  deficiency_title TEXT NOT NULL,
+  deficiency_description TEXT NOT NULL,
+  date_identified DATE NOT NULL DEFAULT CURRENT_DATE,
+  identified_by UUID REFERENCES auth.users(id),
+
+  -- Classification per AS 2201 / AU-C 265
+  initial_classification TEXT NOT NULL,
+  -- 'control_deficiency', 'significant_deficiency', 'material_weakness'
+
+  final_classification TEXT,
+  classification_rationale TEXT NOT NULL,
+
+  -- Classification Factors
+  likelihood_of_misstatement TEXT NOT NULL,
+  -- 'remote', 'reasonably_possible', 'probable'
+  magnitude_if_occurs TEXT NOT NULL,
+  -- 'inconsequential', 'more_than_inconsequential', 'material'
+
+  -- Affected Areas
+  affected_accounts TEXT[],
+  affected_assertions TEXT[],
+  affected_financial_statement_areas TEXT[],
+
+  -- Compensating Controls
+  compensating_controls_exist BOOLEAN DEFAULT false,
+  compensating_controls_description TEXT,
+  compensating_controls_tested BOOLEAN DEFAULT false,
+  compensating_controls_effective BOOLEAN,
+  compensating_controls_impact TEXT,
+
+  -- Aggregation Consideration
+  aggregated_with_deficiency_ids UUID[],
+  aggregation_rationale TEXT,
+  aggregated_classification TEXT,
+
+  -- Root Cause Analysis
+  root_cause_analysis TEXT,
+  root_cause_category TEXT,
+  -- 'people', 'process', 'technology', 'governance', 'resources', 'training'
+  systemic_or_isolated TEXT, -- 'systemic', 'isolated'
+
+  -- Impact on Audit
+  impact_on_audit_approach TEXT,
+  additional_procedures_performed TEXT,
+  finding_id UUID, -- Link to audit finding if misstatement resulted
+
+  -- Communication Requirements per AU-C 265
+  requires_management_communication BOOLEAN DEFAULT true,
+  requires_tcwg_communication BOOLEAN DEFAULT false,
+  written_communication_required BOOLEAN DEFAULT false,
+
+  -- Communication Tracking
+  communicated_to_management BOOLEAN DEFAULT false,
+  communicated_to_management_date DATE,
+  communicated_to_management_method TEXT,
+  management_letter_id UUID,
+
+  communicated_to_tcwg BOOLEAN DEFAULT false,
+  communicated_to_tcwg_date DATE,
+  communicated_to_tcwg_method TEXT,
+
+  -- Management Response
+  management_response TEXT,
+  management_response_date DATE,
+  management_agrees BOOLEAN,
+  management_disagreement_reason TEXT,
+
+  -- Remediation
+  remediation_plan TEXT,
+  remediation_owner TEXT,
+  remediation_due_date DATE,
+  remediation_completed_date DATE,
+  remediation_verified BOOLEAN DEFAULT false,
+  remediation_verification_date DATE,
+
+  -- Status
+  status TEXT DEFAULT 'identified',
+  -- 'identified', 'evaluated', 'communicated', 'remediation_planned',
+  -- 'remediation_in_progress', 'remediated', 'verified', 'closed', 'accepted_risk'
+
+  -- Prior Year
+  is_repeat_deficiency BOOLEAN DEFAULT false,
+  prior_year_deficiency_id UUID,
+  year_originally_identified INTEGER,
+
+  -- Follow-up
+  follow_up_required BOOLEAN DEFAULT false,
+  follow_up_engagement_id UUID,
+
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_deficiencies_engagement ON control_deficiencies(engagement_id);
+CREATE INDEX IF NOT EXISTS idx_deficiencies_firm ON control_deficiencies(firm_id);
+CREATE INDEX IF NOT EXISTS idx_deficiencies_classification ON control_deficiencies(final_classification);
+CREATE INDEX IF NOT EXISTS idx_deficiencies_status ON control_deficiencies(status);
+
+-- =====================================================
+-- PART 2: ENGAGEMENT QUALITY CONTROL REVIEW (EQCR)
+-- Standards: ISQM 2, PCAOB AS 1220
+-- =====================================================
+
+CREATE TABLE IF NOT EXISTS eqcr_reviews (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  engagement_id UUID NOT NULL UNIQUE,
+  firm_id UUID NOT NULL,
+
+  -- EQCR Determination
+  eqcr_required BOOLEAN NOT NULL,
+  eqcr_required_reason TEXT,
+  -- 'listed_entity', 'pie', 'high_risk', 'firm_policy', 'regulatory', 'first_year', 'other'
+  eqcr_not_required_rationale TEXT, -- If not required, why
+
+  -- Reviewer Assignment
+  eqcr_reviewer_id UUID REFERENCES auth.users(id),
+  reviewer_assigned_date DATE,
+  reviewer_assigned_by UUID REFERENCES auth.users(id),
+  reviewer_accepted BOOLEAN,
+  reviewer_accepted_date DATE,
+
+  -- Reviewer Eligibility Evaluation
+  eligibility_evaluation JSONB,
+  /*
+  {
+    is_partner: boolean,
+    objectivity_confirmed: boolean,
+    objectivity_threats: string[],
+    objectivity_safeguards: string[],
+    technical_competence_confirmed: boolean,
+    competence_areas: string[],
+    industry_experience: boolean,
+    not_on_engagement_team: boolean,
+    cooling_off_period_met: boolean,
+    authority_confirmed: boolean,
+    evaluation_notes: string
+  }
+  */
+  reviewer_eligible BOOLEAN,
+  eligibility_approved_by UUID REFERENCES auth.users(id),
+  eligibility_approved_at TIMESTAMPTZ,
+
+  -- Review Timing
+  review_commenced_date DATE,
+  review_target_completion DATE,
+  review_actual_completion DATE,
+
+  -- Review Scope
+  review_scope JSONB,
+  /*
+  {
+    significant_risks_identified: string[],
+    significant_judgments_identified: string[],
+    key_audit_matters_if_applicable: string[],
+    areas_of_focus: string[],
+    workpapers_to_review: [{ref: string, description: string}]
+  }
+  */
+
+  -- Discussion with Engagement Partner
+  ep_discussion_date DATE,
+  ep_discussion_topics JSONB,
+  ep_discussion_notes TEXT,
+
+  -- Financial Statement Review
+  fs_and_report_reviewed BOOLEAN DEFAULT false,
+  fs_review_date DATE,
+  fs_review_notes TEXT,
+  report_type_appropriate BOOLEAN,
+  report_wording_appropriate BOOLEAN,
+
+  -- Workpaper Review
+  workpapers_reviewed JSONB DEFAULT '[]',
+  /*
+  Array of {
+    workpaper_ref: string,
+    workpaper_name: string,
+    review_date: date,
+    findings: string,
+    issues: string[]
+  }
+  */
+
+  -- Significant Judgments Evaluation
+  significant_judgments_evaluation JSONB DEFAULT '[]',
+  /*
+  Array of {
+    judgment_area: string,
+    engagement_team_conclusion: string,
+    supporting_evidence_reviewed: string,
+    eqcr_evaluation: string,
+    eqcr_agrees: boolean,
+    matters_for_discussion: string
+  }
+  */
+
+  -- Consultation Review
+  consultations_reviewed BOOLEAN DEFAULT false,
+  consultation_conclusions_appropriate BOOLEAN,
+  consultation_review_notes TEXT,
+
+  -- Independence Confirmation
+  independence_reviewed BOOLEAN DEFAULT false,
+  independence_conclusion TEXT,
+  independence_issues TEXT,
+
+  -- Matters Raised
+  matters_raised JSONB DEFAULT '[]',
+  /*
+  Array of {
+    matter_id: string,
+    matter_description: string,
+    severity: string,
+    response_required: string,
+    response_received: string,
+    resolved: boolean,
+    resolution_date: date
+  }
+  */
+  unresolved_matters BOOLEAN DEFAULT false,
+  unresolved_matters_description TEXT,
+
+  -- Differences of Opinion
+  differences_of_opinion BOOLEAN DEFAULT false,
+  differences_description TEXT,
+  differences_resolution TEXT,
+  differences_resolved BOOLEAN,
+  differences_escalated BOOLEAN DEFAULT false,
+  escalation_details TEXT,
+
+  -- Conclusion
+  eqcr_conclusion TEXT,
+  -- 'no_matters', 'all_matters_resolved', 'matters_unresolved'
+  eqcr_conclusion_date DATE,
+
+  -- Sign-off
+  report_can_be_issued BOOLEAN,
+  report_issuance_date DATE,
+
+  -- Documentation
+  eqcr_form_completed BOOLEAN DEFAULT false,
+  eqcr_form_document_id UUID,
+
+  -- Status
+  status TEXT DEFAULT 'not_started',
+  -- 'not_started', 'reviewer_assigned', 'in_progress', 'pending_resolution',
+  -- 'completed', 'report_released'
+
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_eqcr_engagement ON eqcr_reviews(engagement_id);
+CREATE INDEX IF NOT EXISTS idx_eqcr_firm ON eqcr_reviews(firm_id);
+CREATE INDEX IF NOT EXISTS idx_eqcr_reviewer ON eqcr_reviews(eqcr_reviewer_id);
+CREATE INDEX IF NOT EXISTS idx_eqcr_status ON eqcr_reviews(status);
+
+-- Consultation Records
+CREATE TABLE IF NOT EXISTS consultation_records (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  engagement_id UUID NOT NULL,
+  firm_id UUID NOT NULL,
+
+  -- Consultation Details
+  consultation_date DATE NOT NULL,
+  consultation_reference TEXT, -- "CONS-001"
+
+  -- Subject
+  consultation_topic TEXT NOT NULL,
+  consultation_reason TEXT NOT NULL,
+  -- 'complex_transaction', 'new_standard', 'significant_risk', 'disagreement',
+  -- 'industry_specific', 'going_concern', 'fraud', 'independence', 'other'
+
+  -- Participants
+  requested_by UUID REFERENCES auth.users(id),
+  consulted_with_name TEXT NOT NULL,
+  consulted_with_title TEXT,
+  consulted_with_user_id UUID REFERENCES auth.users(id),
+
+  -- External Consultation
+  is_external_consultation BOOLEAN DEFAULT false,
+  external_firm_name TEXT,
+  external_contact TEXT,
+
+  -- Matter Description
+  issue_description TEXT NOT NULL,
+  relevant_facts TEXT NOT NULL,
+  relevant_circumstances TEXT,
+  applicable_standards TEXT,
+  alternative_treatments_considered TEXT,
+
+  -- Advice Received
+  advice_received TEXT NOT NULL,
+  advice_date DATE,
+  supporting_references TEXT,
+
+  -- Conclusion
+  conclusion_reached TEXT NOT NULL,
+  conclusion_rationale TEXT,
+
+  -- Implementation
+  conclusion_implemented BOOLEAN DEFAULT false,
+  implementation_description TEXT,
+  implementation_date DATE,
+
+  -- Documentation
+  supporting_document_ids UUID[],
+
+  -- Engagement Partner Awareness
+  engagement_partner_aware BOOLEAN DEFAULT true,
+  engagement_partner_agrees BOOLEAN,
+  ep_disagreement_notes TEXT,
+
+  -- Review
+  documented_by UUID REFERENCES auth.users(id),
+  reviewed_by UUID REFERENCES auth.users(id),
+  reviewed_at TIMESTAMPTZ,
+
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_consultation_engagement ON consultation_records(engagement_id);
+CREATE INDEX IF NOT EXISTS idx_consultation_firm ON consultation_records(firm_id);
+
+-- =====================================================
+-- PART 3: GOING CONCERN ASSESSMENT
+-- Standards: AU-C 570, ISA 570
+-- =====================================================
+
+CREATE TABLE IF NOT EXISTS going_concern_assessments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  engagement_id UUID NOT NULL UNIQUE,
+  firm_id UUID NOT NULL,
+
+  -- Assessment Period
+  assessment_date DATE NOT NULL DEFAULT CURRENT_DATE,
+  balance_sheet_date DATE NOT NULL,
+  evaluation_period_end DATE NOT NULL, -- Typically 12 months from BS date
+  evaluation_period_description TEXT,
+
+  -- Management's Assessment
+  management_assessment_obtained BOOLEAN NOT NULL DEFAULT false,
+  management_assessment_date DATE,
+  management_assessment_period TEXT,
+  management_methods_used TEXT,
+  management_conclusion TEXT,
+  -- 'no_material_uncertainty', 'material_uncertainty_exists', 'going_concern_inappropriate'
+
+  -- FINANCIAL INDICATORS
+  financial_indicators JSONB NOT NULL DEFAULT '[]',
+  /*
+  Array of {
+    indicator: string, // e.g., 'net_liability_position', 'recurring_losses', 'negative_cash_flows'
+    present: boolean,
+    details: string,
+    severity: 'low' | 'moderate' | 'high',
+    trend: 'improving' | 'stable' | 'deteriorating'
+  }
+  */
+  financial_indicators_summary TEXT,
+
+  -- OPERATING INDICATORS
+  operating_indicators JSONB NOT NULL DEFAULT '[]',
+  /*
+  Array of {
+    indicator: string, // e.g., 'loss_key_management', 'loss_key_customer', 'labor_difficulties'
+    present: boolean,
+    details: string,
+    severity: 'low' | 'moderate' | 'high'
+  }
+  */
+  operating_indicators_summary TEXT,
+
+  -- OTHER INDICATORS
+  other_indicators JSONB NOT NULL DEFAULT '[]',
+  /*
+  Array of {
+    indicator: string, // e.g., 'litigation', 'regulatory_issues', 'catastrophe'
+    present: boolean,
+    details: string,
+    severity: 'low' | 'moderate' | 'high'
+  }
+  */
+  other_indicators_summary TEXT,
+
+  -- AUDITOR'S EVALUATION
+  conditions_events_identified BOOLEAN NOT NULL DEFAULT false,
+  conditions_description TEXT,
+  substantial_doubt_before_plans BOOLEAN,
+  doubt_before_plans_rationale TEXT,
+
+  -- MANAGEMENT'S PLANS
+  management_plans JSONB DEFAULT '[]',
+  /*
+  Array of {
+    plan_type: string, // 'dispose_assets', 'borrow_funds', 'restructure_debt', 'reduce_costs', 'increase_equity'
+    description: string,
+    timeline: string,
+    feasibility_assessment: 'probable' | 'possible' | 'remote',
+    supporting_evidence: string,
+    auditor_evaluation: string,
+    mitigating_effect: 'significant' | 'moderate' | 'limited'
+  }
+  */
+  plans_alleviate_doubt BOOLEAN,
+  plans_evaluation_summary TEXT,
+
+  -- ADDITIONAL PROCEDURES PERFORMED
+  additional_procedures JSONB DEFAULT '[]',
+  /*
+  Array of {
+    procedure: string,
+    results: string,
+    conclusion: string
+  }
+  */
+
+  -- FINAL CONCLUSION
+  final_conclusion TEXT NOT NULL,
+  -- 'no_substantial_doubt', 'substantial_doubt_alleviated', 'substantial_doubt_exists',
+  -- 'going_concern_basis_inappropriate'
+  conclusion_rationale TEXT NOT NULL,
+
+  -- REPORT IMPACT
+  report_modification_required BOOLEAN DEFAULT false,
+  modification_type TEXT,
+  -- 'none', 'material_uncertainty_paragraph', 'emphasis_of_matter',
+  -- 'qualified_scope', 'qualified_gaap', 'adverse', 'disclaimer'
+  modification_wording TEXT,
+
+  -- DISCLOSURE REVIEW
+  disclosure_required BOOLEAN DEFAULT false,
+  disclosure_adequate BOOLEAN,
+  disclosure_location TEXT,
+  disclosure_issues TEXT,
+  disclosure_recommendations TEXT,
+
+  -- Written Representations
+  specific_representations_obtained BOOLEAN DEFAULT false,
+  representation_details TEXT,
+
+  -- Documentation References
+  supporting_evidence_refs JSONB,
+
+  -- Sign-offs
+  prepared_by UUID REFERENCES auth.users(id),
+  prepared_at TIMESTAMPTZ DEFAULT NOW(),
+  reviewed_by UUID REFERENCES auth.users(id),
+  reviewed_at TIMESTAMPTZ,
+  partner_reviewed_by UUID REFERENCES auth.users(id),
+  partner_reviewed_at TIMESTAMPTZ,
+
+  -- Status
+  status TEXT DEFAULT 'not_started',
+  -- 'not_started', 'in_progress', 'pending_review', 'completed'
+
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_going_concern_engagement ON going_concern_assessments(engagement_id);
+CREATE INDEX IF NOT EXISTS idx_going_concern_firm ON going_concern_assessments(firm_id);
+CREATE INDEX IF NOT EXISTS idx_going_concern_conclusion ON going_concern_assessments(final_conclusion);
+
+-- =====================================================
+-- PART 4: RELATED PARTIES
+-- Standards: AU-C 550, ISA 550
+-- =====================================================
+
+-- Related Parties Register
+CREATE TABLE IF NOT EXISTS related_parties (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  engagement_id UUID NOT NULL,
+  firm_id UUID NOT NULL,
+  client_id UUID NOT NULL,
+
+  -- Party Identification
+  party_name TEXT NOT NULL,
+  party_type TEXT NOT NULL,
+  -- 'parent', 'subsidiary', 'affiliate', 'associate', 'joint_venture',
+  -- 'key_management', 'close_family', 'shareholder', 'pension_fund', 'other'
+
+  -- Relationship Details
+  relationship_description TEXT NOT NULL,
+  relationship_nature TEXT, -- 'ownership', 'control', 'influence', 'family', 'business'
+  relationship_start_date DATE,
+  relationship_end_date DATE, -- If no longer related
+
+  -- Ownership Details
+  ownership_percentage DECIMAL,
+  voting_rights_percentage DECIMAL,
+  control_description TEXT,
+
+  -- Contact Information
+  contact_name TEXT,
+  contact_title TEXT,
+  contact_email TEXT,
+  contact_phone TEXT,
+  address TEXT,
+
+  -- For Individuals (Key Management/Family)
+  position_title TEXT,
+  relationship_to_management TEXT,
+  is_covered_person BOOLEAN DEFAULT false, -- For independence purposes
+
+  -- Risk Assessment
+  risk_of_undisclosed_transactions TEXT, -- 'low', 'moderate', 'high'
+  risk_rationale TEXT,
+  requires_enhanced_procedures BOOLEAN DEFAULT false,
+
+  -- Disclosure
+  disclosed_by_management BOOLEAN DEFAULT false,
+  disclosure_date DATE,
+  disclosed_in_financial_statements BOOLEAN,
+  disclosure_complete BOOLEAN,
+  disclosure_issues TEXT,
+
+  -- Identification Source
+  identification_source TEXT,
+  -- 'management_inquiry', 'prior_year', 'public_records', 'bank_confirmations',
+  -- 'minutes_review', 'analytical_procedures', 'other'
+  identification_date DATE,
+
+  -- Status
+  status TEXT DEFAULT 'active', -- 'active', 'inactive', 'pending_verification'
+  verified BOOLEAN DEFAULT false,
+  verified_by UUID REFERENCES auth.users(id),
+  verified_at TIMESTAMPTZ,
+
+  created_by UUID REFERENCES auth.users(id),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_related_parties_engagement ON related_parties(engagement_id);
+CREATE INDEX IF NOT EXISTS idx_related_parties_firm ON related_parties(firm_id);
+CREATE INDEX IF NOT EXISTS idx_related_parties_type ON related_parties(party_type);
+
+-- Related Party Transactions
+CREATE TABLE IF NOT EXISTS related_party_transactions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  engagement_id UUID NOT NULL,
+  firm_id UUID NOT NULL,
+  related_party_id UUID NOT NULL REFERENCES related_parties(id),
+
+  -- Transaction Identification
+  transaction_reference TEXT, -- "RPT-001"
+  transaction_type TEXT NOT NULL,
+  -- 'sale_of_goods', 'purchase_of_goods', 'sale_of_services', 'purchase_of_services',
+  -- 'loan_to', 'loan_from', 'guarantee', 'lease', 'management_fee', 'royalty',
+  -- 'dividend', 'capital_contribution', 'transfer_of_assets', 'other'
+
+  transaction_description TEXT NOT NULL,
+  transaction_date DATE,
+  transaction_amount DECIMAL,
+  transaction_currency TEXT DEFAULT 'USD',
+  recurring BOOLEAN DEFAULT false,
+  recurring_frequency TEXT, -- 'monthly', 'quarterly', 'annual'
+
+  -- Terms Assessment
+  terms_description TEXT,
+  payment_terms TEXT,
+  interest_rate DECIMAL, -- For loans
+  collateral_description TEXT, -- For loans/guarantees
+
+  -- Arm's Length Assessment
+  arms_length_assessment TEXT NOT NULL,
+  -- 'arms_length', 'not_arms_length', 'cannot_determine'
+  assessment_basis TEXT NOT NULL,
+  comparable_transactions_available BOOLEAN,
+  comparable_transactions_description TEXT,
+  price_variance_if_any DECIMAL,
+  arm_length_rationale TEXT,
+
+  -- Business Purpose
+  business_purpose TEXT NOT NULL,
+  business_purpose_evaluation TEXT,
+  -- 'valid_business_purpose', 'questionable', 'no_apparent_purpose'
+  substance_over_form_concerns BOOLEAN DEFAULT false,
+  substance_concerns_description TEXT,
+
+  -- Authorization
+  properly_authorized BOOLEAN,
+  authorization_level TEXT, -- 'management', 'board', 'shareholders'
+  authorization_date DATE,
+  authorization_documentation TEXT,
+
+  -- Accounting Treatment
+  accounting_treatment_description TEXT,
+  accounting_treatment_appropriate BOOLEAN,
+  gaap_compliance_issues TEXT,
+
+  -- Disclosure Assessment
+  disclosure_required BOOLEAN DEFAULT true,
+  properly_disclosed BOOLEAN,
+  disclosure_location TEXT,
+  disclosure_description TEXT,
+  disclosure_adequate BOOLEAN,
+  disclosure_issues TEXT,
+
+  -- Audit Procedures
+  procedures_performed JSONB DEFAULT '[]',
+  /*
+  Array of {
+    procedure: string,
+    results: string
+  }
+  */
+  evidence_obtained TEXT,
+  evidence_document_ids UUID[],
+
+  -- Findings
+  issues_identified BOOLEAN DEFAULT false,
+  issues_description TEXT,
+  finding_id UUID, -- Link to audit finding if applicable
+  adjustment_id UUID, -- Link to audit adjustment if applicable
+
+  -- Fraud Considerations
+  potential_fraud_indicator BOOLEAN DEFAULT false,
+  fraud_evaluation TEXT,
+
+  created_by UUID REFERENCES auth.users(id),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_rp_transactions_engagement ON related_party_transactions(engagement_id);
+CREATE INDEX IF NOT EXISTS idx_rp_transactions_party ON related_party_transactions(related_party_id);
+CREATE INDEX IF NOT EXISTS idx_rp_transactions_type ON related_party_transactions(transaction_type);
+
+-- =====================================================
+-- PART 5: RLS POLICIES
+-- =====================================================
+
+-- Enable RLS
+ALTER TABLE internal_controls ENABLE ROW LEVEL SECURITY;
+ALTER TABLE control_walkthroughs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE control_test_results ENABLE ROW LEVEL SECURITY;
+ALTER TABLE control_deficiencies ENABLE ROW LEVEL SECURITY;
+ALTER TABLE eqcr_reviews ENABLE ROW LEVEL SECURITY;
+ALTER TABLE consultation_records ENABLE ROW LEVEL SECURITY;
+ALTER TABLE going_concern_assessments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE related_parties ENABLE ROW LEVEL SECURITY;
+ALTER TABLE related_party_transactions ENABLE ROW LEVEL SECURITY;
+
+-- Internal Controls policies
+CREATE POLICY "Users can view controls in their firm"
+  ON internal_controls FOR SELECT
+  USING (firm_id IN (SELECT firm_id FROM firm_users WHERE user_id = auth.uid()));
+
+CREATE POLICY "Users can manage controls in their firm"
+  ON internal_controls FOR ALL
+  USING (firm_id IN (SELECT firm_id FROM firm_users WHERE user_id = auth.uid()));
+
+-- Control Walkthroughs policies
+CREATE POLICY "Users can view walkthroughs in their firm"
+  ON control_walkthroughs FOR SELECT
+  USING (firm_id IN (SELECT firm_id FROM firm_users WHERE user_id = auth.uid()));
+
+CREATE POLICY "Users can manage walkthroughs in their firm"
+  ON control_walkthroughs FOR ALL
+  USING (firm_id IN (SELECT firm_id FROM firm_users WHERE user_id = auth.uid()));
+
+-- Control Test Results policies
+CREATE POLICY "Users can view test results in their firm"
+  ON control_test_results FOR SELECT
+  USING (firm_id IN (SELECT firm_id FROM firm_users WHERE user_id = auth.uid()));
+
+CREATE POLICY "Users can manage test results in their firm"
+  ON control_test_results FOR ALL
+  USING (firm_id IN (SELECT firm_id FROM firm_users WHERE user_id = auth.uid()));
+
+-- Control Deficiencies policies
+CREATE POLICY "Users can view deficiencies in their firm"
+  ON control_deficiencies FOR SELECT
+  USING (firm_id IN (SELECT firm_id FROM firm_users WHERE user_id = auth.uid()));
+
+CREATE POLICY "Users can manage deficiencies in their firm"
+  ON control_deficiencies FOR ALL
+  USING (firm_id IN (SELECT firm_id FROM firm_users WHERE user_id = auth.uid()));
+
+-- EQCR policies
+CREATE POLICY "Partners can view EQCR in their firm"
+  ON eqcr_reviews FOR SELECT
+  USING (firm_id IN (SELECT firm_id FROM firm_users WHERE user_id = auth.uid() AND role IN ('admin', 'partner', 'manager')));
+
+CREATE POLICY "Partners can manage EQCR in their firm"
+  ON eqcr_reviews FOR ALL
+  USING (firm_id IN (SELECT firm_id FROM firm_users WHERE user_id = auth.uid() AND role IN ('admin', 'partner')));
+
+-- Consultation policies
+CREATE POLICY "Users can view consultations in their firm"
+  ON consultation_records FOR SELECT
+  USING (firm_id IN (SELECT firm_id FROM firm_users WHERE user_id = auth.uid()));
+
+CREATE POLICY "Users can manage consultations in their firm"
+  ON consultation_records FOR ALL
+  USING (firm_id IN (SELECT firm_id FROM firm_users WHERE user_id = auth.uid()));
+
+-- Going Concern policies
+CREATE POLICY "Users can view going concern in their firm"
+  ON going_concern_assessments FOR SELECT
+  USING (firm_id IN (SELECT firm_id FROM firm_users WHERE user_id = auth.uid()));
+
+CREATE POLICY "Users can manage going concern in their firm"
+  ON going_concern_assessments FOR ALL
+  USING (firm_id IN (SELECT firm_id FROM firm_users WHERE user_id = auth.uid()));
+
+-- Related Parties policies
+CREATE POLICY "Users can view related parties in their firm"
+  ON related_parties FOR SELECT
+  USING (firm_id IN (SELECT firm_id FROM firm_users WHERE user_id = auth.uid()));
+
+CREATE POLICY "Users can manage related parties in their firm"
+  ON related_parties FOR ALL
+  USING (firm_id IN (SELECT firm_id FROM firm_users WHERE user_id = auth.uid()));
+
+-- Related Party Transactions policies
+CREATE POLICY "Users can view RP transactions in their firm"
+  ON related_party_transactions FOR SELECT
+  USING (firm_id IN (SELECT firm_id FROM firm_users WHERE user_id = auth.uid()));
+
+CREATE POLICY "Users can manage RP transactions in their firm"
+  ON related_party_transactions FOR ALL
+  USING (firm_id IN (SELECT firm_id FROM firm_users WHERE user_id = auth.uid()));
+
+-- =====================================================
+-- MIGRATION COMPLETE
+-- =====================================================
+
+COMMENT ON TABLE internal_controls IS 'Internal controls register per COSO framework and AS 2201';
+COMMENT ON TABLE control_walkthroughs IS 'Control walkthrough documentation';
+COMMENT ON TABLE control_test_results IS 'Control testing results and conclusions';
+COMMENT ON TABLE control_deficiencies IS 'Control deficiencies classification per AU-C 265';
+COMMENT ON TABLE eqcr_reviews IS 'Engagement Quality Control Reviews per ISQM 2 / AS 1220';
+COMMENT ON TABLE consultation_records IS 'Consultation documentation';
+COMMENT ON TABLE going_concern_assessments IS 'Going concern assessments per AU-C 570 / ISA 570';
+COMMENT ON TABLE related_parties IS 'Related parties register per AU-C 550 / ISA 550';
+COMMENT ON TABLE related_party_transactions IS 'Related party transactions documentation';

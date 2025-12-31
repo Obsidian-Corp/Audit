@@ -43,17 +43,17 @@ export function GlobalSearch() {
           .ilike('client_name', searchTerm)
           .limit(5);
 
-        // Search engagements
+        // Search audits (engagements table doesn't exist)
         const { data: engagements } = await supabase
-          .from('engagements')
-          .select('id, name, engagement_type, clients(client_name)')
-          .ilike('name', searchTerm)
+          .from('audits')
+          .select('id, audit_title, audit_type, clients(client_name)')
+          .ilike('audit_title', searchTerm)
           .limit(5);
 
         // Search procedures
         const { data: procedures } = await supabase
           .from('audit_procedures')
-          .select('id, description, engagements(name)')
+          .select('id, description, audits(audit_title)')
           .ilike('description', searchTerm)
           .limit(5);
 
@@ -67,14 +67,14 @@ export function GlobalSearch() {
         // Search findings
         const { data: findings } = await supabase
           .from('audit_findings')
-          .select('id, title, finding_number, engagements(name)')
+          .select('id, title, finding_number, audits(audit_title)')
           .ilike('title', searchTerm)
           .limit(5);
 
         // Search programs
         const { data: programs } = await supabase
           .from('engagement_programs')
-          .select('id, program_name, engagements(name)')
+          .select('id, program_name, audits(audit_title)')
           .ilike('program_name', searchTerm)
           .limit(5);
 
@@ -91,13 +91,13 @@ export function GlobalSearch() {
           })));
         }
 
-        // Map engagements
+        // Map engagements (audits)
         if (engagements) {
           allResults.push(...engagements.map((e: any) => ({
             id: e.id,
             type: 'engagement' as const,
-            title: e.name,
-            subtitle: e.clients?.client_name || e.engagement_type,
+            title: e.audit_title,
+            subtitle: e.clients?.client_name || e.audit_type,
             url: `/engagements/${e.id}`,
           })));
         }
@@ -108,7 +108,7 @@ export function GlobalSearch() {
             id: p.id,
             type: 'procedure' as const,
             title: p.description.substring(0, 60) + (p.description.length > 60 ? '...' : ''),
-            subtitle: p.engagements?.name,
+            subtitle: p.audits?.audit_title,
             url: `/audit/procedures/${p.id}`,
           })));
         }
@@ -130,7 +130,7 @@ export function GlobalSearch() {
             id: f.id,
             type: 'finding' as const,
             title: f.finding_number || f.title,
-            subtitle: f.engagements?.name || f.title,
+            subtitle: f.audits?.audit_title || f.title,
             url: `/audit/findings/${f.id}`,
           })));
         }
@@ -141,7 +141,7 @@ export function GlobalSearch() {
             id: p.id,
             type: 'program' as const,
             title: p.program_name,
-            subtitle: p.engagements?.name,
+            subtitle: p.audits?.audit_title,
             url: `/audit/programs/${p.id}`,
           })));
         }

@@ -1,0 +1,545 @@
+-- =====================================================================
+-- MIGRATION: Create workflow triggers
+-- Ticket: DB-008
+-- Purpose: Automation triggers for notifications, status updates,
+--          and workflow state transitions across the system
+-- =====================================================================
+
+-- =====================================================================
+-- NOTIFICATION TRIGGERS
+-- =====================================================================
+
+-- Trigger: Send notification when workpaper is assigned for review
+CREATE OR REPLACE FUNCTION notify_workpaper_review_assignment()
+RETURNS TRIGGER AS $$
+BEGIN
+  -- Only trigger when current_reviewer_id is set or changed
+  IF NEW.current_reviewer_id IS NOT NULL
+     AND (OLD.current_reviewer_id IS NULL OR OLD.current_reviewer_id != NEW.current_reviewer_id) THEN
+
+    INSERT INTO public.notifications (user_id, type, title, message, data)
+    VALUES (
+      NEW.current_reviewer_id,
+      'task_assignment',
+      'Workpaper Assigned for Review',
+      'You have been assigned to review workpaper: ' || COALESCE(NEW.title, NEW.workpaper_reference, NEW.id::TEXT),
+      jsonb_build_object(
+        'workpaper_id', NEW.id,
+        'workpaper_reference', NEW.workpaper_reference,
+        'engagement_id', NEW.audit_id,
+        'action_url', '/engagements/' || NEW.audit_id || '/workpapers/' || NEW.id
+      )
+    );
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS trigger_notify_workpaper_review_assignment ON public.audit_workpapers;
+
+CREATE TRIGGER trigger_notify_workpaper_review_assignment
+  AFTER UPDATE ON public.audit_workpapers
+  FOR EACH ROW
+  EXECUTE FUNCTION notify_workpaper_review_assignment();
+
+-- Trigger: Send notification when workpaper review status changes
+CREATE OR REPLACE FUNCTION notify_workpaper_status_change()
+RETURNS TRIGGER AS $$
+DECLARE
+  v_preparer_id UUID;
+  v_notification_title TEXT;
+  v_notification_message TEXT;
+BEGIN
+  -- Only trigger on review_status changes
+  IF OLD.review_status IS DISTINCT FROM NEW.review_status THEN
+
+    -- Get the preparer (created_by or prepared_by)
+    v_preparer_id := COALESCE(NEW.created_by, NEW.prepared_by);
+
+    -- Determine notification based on new status
+    CASE NEW.review_status
+      WHEN 'changes_requested' THEN
+        v_notification_title := 'Changes Requested on Workpaper';
+        v_notification_message := 'Reviewer has requested changes on workpaper: ' || COALESCE(NEW.title, NEW.workpaper_reference);
+
+        -- Notify preparer
+        IF v_preparer_id IS NOT NULL THEN
+          INSERT INTO public.notifications (user_id, type, title, message, data, priority)
+          VALUES (
+            v_preparer_id,
+            'review_comment',
+            v_notification_title,
+            v_notification_message,
+            jsonb_build_object(
+              'workpaper_id', NEW.id,
+              'workpaper_reference', NEW.workpaper_reference,
+              'engagement_id', NEW.audit_id,
+              'previous_status', OLD.review_status,
+              'new_status', NEW.review_status,
+              'action_url', '/engagements/' || NEW.audit_id || '/workpapers/' || NEW.id
+            ),
+            'high'
+          );
+        END IF;
+
+      WHEN 'approved' THEN
+        v_notification_title := 'Workpaper Approved';
+        v_notification_message := 'Your workpaper has been approved: ' || COALESCE(NEW.title, NEW.workpaper_reference);
+
+        -- Notify preparer
+        IF v_preparer_id IS NOT NULL THEN
+          INSERT INTO public.notifications (user_id, type, title, message, data)
+          VALUES (
+            v_preparer_id,
+            'approval',
+            v_notification_title,
+            v_notification_message,
+            jsonb_build_object(
+              'workpaper_id', NEW.id,
+              'workpaper_reference', NEW.workpaper_reference,
+              'engagement_id', NEW.audit_id,
+              'approved_by', NEW.current_reviewer_id,
+              'action_url', '/engagements/' || NEW.audit_id || '/workpapers/' || NEW.id
+            )
+          );
+        END IF;
+
+      WHEN 'locked' THEN
+        v_notification_title := 'Workpaper Locked';
+        v_notification_message := 'Workpaper has been locked: ' || COALESCE(NEW.title, NEW.workpaper_reference);
+
+        -- Notify preparer
+        IF v_preparer_id IS NOT NULL THEN
+          INSERT INTO public.notifications (user_id, type, title, message, data)
+          VALUES (
+            v_preparer_id,
+            'system',
+            v_notification_title,
+            v_notification_message,
+            jsonb_build_object(
+              'workpaper_id', NEW.id,
+              'workpaper_reference', NEW.workpaper_reference,
+              'engagement_id', NEW.audit_id,
+              'locked_by', NEW.locked_by,
+              'locked_at', NEW.locked_at,
+              'action_url', '/engagements/' || NEW.audit_id || '/workpapers/' || NEW.id
+            )
+          );
+        END IF;
+
+      ELSE
+        -- No notification for other status changes
+        NULL;
+    END CASE;
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS trigger_notify_workpaper_status_change ON public.audit_workpapers;
+
+CREATE TRIGGER trigger_notify_workpaper_status_change
+  AFTER UPDATE ON public.audit_workpapers
+  FOR EACH ROW
+  EXECUTE FUNCTION notify_workpaper_status_change();
+
+-- Trigger: Send notification when sign-off is added
+CREATE OR REPLACE FUNCTION notify_signoff_added()
+RETURNS TRIGGER AS $$
+DECLARE
+  v_workpaper RECORD;
+  v_next_reviewer_id UUID;
+  v_signoff_type_display TEXT;
+BEGIN
+  -- Get workpaper details
+  SELECT * INTO v_workpaper
+  FROM public.audit_workpapers
+  WHERE id = NEW.workpaper_id;
+
+  -- Determine display name for signoff type
+  v_signoff_type_display := INITCAP(NEW.signoff_type);
+
+  -- Notify the next level reviewer based on sign-off hierarchy
+  -- Hierarchy: preparer -> reviewer -> manager -> partner
+  CASE NEW.signoff_type
+    WHEN 'preparer' THEN
+      -- Find a reviewer (senior or manager)
+      SELECT atm.user_id INTO v_next_reviewer_id
+      FROM public.audit_team_members atm
+      WHERE atm.audit_id = v_workpaper.audit_id
+        AND atm.role IN ('reviewer', 'senior', 'manager')
+        AND atm.user_id != NEW.user_id
+      ORDER BY
+        CASE atm.role
+          WHEN 'reviewer' THEN 1
+          WHEN 'senior' THEN 2
+          WHEN 'manager' THEN 3
+        END
+      LIMIT 1;
+
+    WHEN 'reviewer' THEN
+      -- Find a manager
+      SELECT atm.user_id INTO v_next_reviewer_id
+      FROM public.audit_team_members atm
+      WHERE atm.audit_id = v_workpaper.audit_id
+        AND atm.role IN ('manager', 'partner')
+        AND atm.user_id != NEW.user_id
+      ORDER BY
+        CASE atm.role
+          WHEN 'manager' THEN 1
+          WHEN 'partner' THEN 2
+        END
+      LIMIT 1;
+
+    WHEN 'manager' THEN
+      -- Find a partner
+      SELECT atm.user_id INTO v_next_reviewer_id
+      FROM public.audit_team_members atm
+      WHERE atm.audit_id = v_workpaper.audit_id
+        AND atm.role = 'partner'
+        AND atm.user_id != NEW.user_id
+      LIMIT 1;
+
+    ELSE
+      -- Partner sign-off - no next level
+      v_next_reviewer_id := NULL;
+  END CASE;
+
+  -- Send notification to next reviewer if found
+  IF v_next_reviewer_id IS NOT NULL THEN
+    INSERT INTO public.notifications (user_id, type, title, message, data, priority)
+    VALUES (
+      v_next_reviewer_id,
+      'signoff_required',
+      v_signoff_type_display || ' Sign-Off Complete - Your Review Required',
+      'Workpaper "' || COALESCE(v_workpaper.title, v_workpaper.workpaper_reference) || '" is ready for your sign-off.',
+      jsonb_build_object(
+        'workpaper_id', NEW.workpaper_id,
+        'workpaper_reference', v_workpaper.workpaper_reference,
+        'engagement_id', v_workpaper.audit_id,
+        'signoff_type', NEW.signoff_type,
+        'signed_by', NEW.user_id,
+        'action_url', '/engagements/' || v_workpaper.audit_id || '/workpapers/' || NEW.workpaper_id
+      ),
+      'high'
+    );
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS trigger_notify_signoff_added ON public.workpaper_signoffs;
+
+CREATE TRIGGER trigger_notify_signoff_added
+  AFTER INSERT ON public.workpaper_signoffs
+  FOR EACH ROW
+  EXECUTE FUNCTION notify_signoff_added();
+
+-- Trigger: Send notification for new review notes
+CREATE OR REPLACE FUNCTION notify_review_note_added()
+RETURNS TRIGGER AS $$
+DECLARE
+  v_workpaper RECORD;
+  v_author_name TEXT;
+  v_notify_user_id UUID;
+BEGIN
+  -- Get workpaper details
+  SELECT * INTO v_workpaper
+  FROM public.audit_workpapers
+  WHERE id = NEW.workpaper_id;
+
+  -- Get author name
+  SELECT COALESCE(full_name, email) INTO v_author_name
+  FROM public.profiles
+  WHERE id = NEW.created_by;
+
+  -- Determine who to notify:
+  -- 1. If it's a reply, notify the parent note author
+  -- 2. If it's a new note, notify the workpaper preparer
+  IF NEW.thread_root_id IS NOT NULL AND NEW.parent_note_id IS NOT NULL THEN
+    SELECT created_by INTO v_notify_user_id
+    FROM public.review_notes
+    WHERE id = NEW.parent_note_id;
+  ELSE
+    v_notify_user_id := COALESCE(v_workpaper.created_by, v_workpaper.prepared_by);
+  END IF;
+
+  -- Don't notify yourself
+  IF v_notify_user_id IS NOT NULL AND v_notify_user_id != NEW.created_by THEN
+    INSERT INTO public.notifications (user_id, type, title, message, data, priority)
+    VALUES (
+      v_notify_user_id,
+      'review_comment',
+      CASE WHEN NEW.note_type = 'question' THEN 'Question on Workpaper'
+           WHEN NEW.note_type = 'issue' THEN 'Issue Raised on Workpaper'
+           ELSE 'New Review Note'
+      END,
+      v_author_name || ' added a ' || NEW.note_type || ' on workpaper: ' || COALESCE(v_workpaper.title, v_workpaper.workpaper_reference),
+      jsonb_build_object(
+        'workpaper_id', NEW.workpaper_id,
+        'workpaper_reference', v_workpaper.workpaper_reference,
+        'engagement_id', v_workpaper.audit_id,
+        'note_id', NEW.id,
+        'note_type', NEW.note_type,
+        'note_preview', LEFT(NEW.content, 100),
+        'action_url', '/engagements/' || v_workpaper.audit_id || '/workpapers/' || NEW.workpaper_id || '#note-' || NEW.id
+      ),
+      CASE WHEN NEW.note_type = 'issue' THEN 'high' ELSE 'normal' END
+    );
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS trigger_notify_review_note_added ON public.review_notes;
+
+CREATE TRIGGER trigger_notify_review_note_added
+  AFTER INSERT ON public.review_notes
+  FOR EACH ROW
+  EXECUTE FUNCTION notify_review_note_added();
+
+-- =====================================================================
+-- PROCEDURE STATUS SYNC TRIGGERS
+-- =====================================================================
+
+-- Trigger: Update procedure status when primary workpaper status changes
+CREATE OR REPLACE FUNCTION sync_procedure_from_workpaper()
+RETURNS TRIGGER AS $$
+BEGIN
+  -- Only proceed if this workpaper is a primary workpaper for a procedure
+  IF EXISTS (
+    SELECT 1 FROM public.audit_procedures
+    WHERE primary_workpaper_id = NEW.id
+  ) THEN
+    -- Update procedure workflow_status based on workpaper review_status
+    UPDATE public.audit_procedures
+    SET workflow_status = CASE
+      WHEN NEW.review_status = 'locked' THEN 'signed_off'
+      WHEN NEW.review_status = 'approved' THEN 'approved'
+      WHEN NEW.review_status IN ('pending_review', 'in_review') THEN 'pending_review'
+      WHEN NEW.review_status = 'changes_requested' THEN 'changes_requested'
+      WHEN NEW.review_status = 'draft' THEN 'in_progress'
+      ELSE workflow_status
+    END,
+    updated_at = NOW()
+    WHERE primary_workpaper_id = NEW.id
+      AND workflow_status NOT IN ('not_applicable', 'signed_off'); -- Don't override N/A or already signed off
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS trigger_sync_procedure_from_workpaper ON public.audit_workpapers;
+
+CREATE TRIGGER trigger_sync_procedure_from_workpaper
+  AFTER UPDATE ON public.audit_workpapers
+  FOR EACH ROW
+  WHEN (OLD.review_status IS DISTINCT FROM NEW.review_status)
+  EXECUTE FUNCTION sync_procedure_from_workpaper();
+
+-- =====================================================================
+-- FINDING NOTIFICATION TRIGGERS
+-- =====================================================================
+
+-- Trigger: Send notification when new finding is created
+CREATE OR REPLACE FUNCTION notify_finding_created()
+RETURNS TRIGGER AS $$
+DECLARE
+  v_engagement RECORD;
+  v_manager_ids UUID[];
+BEGIN
+  -- Get engagement details
+  SELECT a.*, c.client_name
+  INTO v_engagement
+  FROM public.audits a
+  LEFT JOIN public.clients c ON c.id = a.client_id
+  WHERE a.id = NEW.engagement_id;
+
+  -- Get managers and partners on the engagement
+  SELECT ARRAY_AGG(user_id) INTO v_manager_ids
+  FROM public.audit_team_members
+  WHERE audit_id = NEW.engagement_id
+    AND role IN ('manager', 'partner')
+    AND user_id != NEW.created_by;
+
+  -- Notify each manager/partner
+  IF v_manager_ids IS NOT NULL THEN
+    INSERT INTO public.notifications (user_id, type, title, message, data, priority)
+    SELECT
+      unnest(v_manager_ids),
+      'finding_created',
+      'New ' || INITCAP(COALESCE(NEW.severity, 'finding')) || ' Finding',
+      'New finding identified: ' || COALESCE(NEW.title, NEW.finding_reference),
+      jsonb_build_object(
+        'finding_id', NEW.id,
+        'finding_reference', NEW.finding_reference,
+        'engagement_id', NEW.engagement_id,
+        'severity', NEW.severity,
+        'title', NEW.title,
+        'action_url', '/engagements/' || NEW.engagement_id || '/findings/' || NEW.id
+      ),
+      CASE NEW.severity
+        WHEN 'critical' THEN 'urgent'
+        WHEN 'high' THEN 'high'
+        ELSE 'normal'
+      END;
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS trigger_notify_finding_created ON public.audit_findings;
+
+CREATE TRIGGER trigger_notify_finding_created
+  AFTER INSERT ON public.audit_findings
+  FOR EACH ROW
+  EXECUTE FUNCTION notify_finding_created();
+
+-- =====================================================================
+-- DEADLINE/DUE DATE TRIGGERS
+-- =====================================================================
+
+-- Function to check for approaching deadlines (called by cron job)
+CREATE OR REPLACE FUNCTION check_engagement_deadlines()
+RETURNS void AS $$
+DECLARE
+  v_engagement RECORD;
+  v_days_until_due INT;
+  v_team_member RECORD;
+BEGIN
+  -- Find engagements with approaching deadlines
+  FOR v_engagement IN
+    SELECT a.*, c.client_name
+    FROM public.audits a
+    LEFT JOIN public.clients c ON c.id = a.client_id
+    WHERE a.end_date IS NOT NULL
+      AND a.end_date >= CURRENT_DATE
+      AND a.end_date <= CURRENT_DATE + INTERVAL '7 days'
+      AND a.workflow_status NOT IN ('complete', 'cancelled', 'on_hold')
+  LOOP
+    v_days_until_due := (v_engagement.end_date - CURRENT_DATE)::INT;
+
+    -- Only notify at specific intervals: 7 days, 3 days, 1 day, due date
+    IF v_days_until_due IN (7, 3, 1, 0) THEN
+      -- Notify all team members
+      FOR v_team_member IN
+        SELECT user_id FROM public.audit_team_members
+        WHERE audit_id = v_engagement.id
+      LOOP
+        -- Check if we already sent this notification today
+        IF NOT EXISTS (
+          SELECT 1 FROM public.notifications
+          WHERE user_id = v_team_member.user_id
+            AND type = 'deadline_reminder'
+            AND (data->>'engagement_id')::UUID = v_engagement.id
+            AND created_at >= CURRENT_DATE
+        ) THEN
+          INSERT INTO public.notifications (user_id, type, title, message, data, priority)
+          VALUES (
+            v_team_member.user_id,
+            'deadline_reminder',
+            CASE
+              WHEN v_days_until_due = 0 THEN 'Engagement Due Today!'
+              WHEN v_days_until_due = 1 THEN 'Engagement Due Tomorrow'
+              ELSE 'Engagement Due in ' || v_days_until_due || ' Days'
+            END,
+            v_engagement.audit_title || ' for ' || COALESCE(v_engagement.client_name, 'Unknown Client'),
+            jsonb_build_object(
+              'engagement_id', v_engagement.id,
+              'engagement_title', v_engagement.audit_title,
+              'client_name', v_engagement.client_name,
+              'due_date', v_engagement.end_date,
+              'days_until_due', v_days_until_due,
+              'action_url', '/engagements/' || v_engagement.id
+            ),
+            CASE
+              WHEN v_days_until_due = 0 THEN 'urgent'
+              WHEN v_days_until_due = 1 THEN 'high'
+              ELSE 'normal'
+            END
+          );
+        END IF;
+      END LOOP;
+    END IF;
+  END LOOP;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- =====================================================================
+-- ENGAGEMENT ACTIVITY LOG
+-- =====================================================================
+
+-- Trigger: Log significant engagement activities
+CREATE OR REPLACE FUNCTION log_engagement_activity()
+RETURNS TRIGGER AS $$
+BEGIN
+  -- Log status changes
+  IF TG_OP = 'UPDATE' AND OLD.workflow_status IS DISTINCT FROM NEW.workflow_status THEN
+    INSERT INTO public.engagement_activity (
+      engagement_id,
+      activity_type,
+      description,
+      performed_by,
+      metadata
+    ) VALUES (
+      NEW.id,
+      'status_change',
+      'Status changed from ' || COALESCE(OLD.workflow_status, 'none') || ' to ' || NEW.workflow_status,
+      auth.uid(),
+      jsonb_build_object(
+        'old_status', OLD.workflow_status,
+        'new_status', NEW.workflow_status
+      )
+    );
+  END IF;
+
+  -- Log phase changes
+  IF TG_OP = 'UPDATE' AND OLD.engagement_phase IS DISTINCT FROM NEW.engagement_phase THEN
+    INSERT INTO public.engagement_activity (
+      engagement_id,
+      activity_type,
+      description,
+      performed_by,
+      metadata
+    ) VALUES (
+      NEW.id,
+      'phase_change',
+      'Phase changed from ' || COALESCE(OLD.engagement_phase, 'none') || ' to ' || NEW.engagement_phase,
+      auth.uid(),
+      jsonb_build_object(
+        'old_phase', OLD.engagement_phase,
+        'new_phase', NEW.engagement_phase
+      )
+    );
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS trigger_log_engagement_activity ON public.audits;
+
+CREATE TRIGGER trigger_log_engagement_activity
+  AFTER UPDATE ON public.audits
+  FOR EACH ROW
+  EXECUTE FUNCTION log_engagement_activity();
+
+-- Success message
+DO $$
+BEGIN
+  RAISE NOTICE '✅ DB-008: Workflow triggers created successfully';
+  RAISE NOTICE '   - Created workpaper review assignment notifications';
+  RAISE NOTICE '   - Created workpaper status change notifications';
+  RAISE NOTICE '   - Created sign-off chain notifications';
+  RAISE NOTICE '   - Created review note notifications';
+  RAISE NOTICE '   - Created procedure-workpaper sync trigger';
+  RAISE NOTICE '   - Created finding notifications';
+  RAISE NOTICE '   - Created deadline reminder function';
+  RAISE NOTICE '   - Created engagement activity logging';
+END $$;

@@ -1,0 +1,511 @@
+================================================================================
+OBSIDIAN AUDIT - FEATURE MATRIX & CROSS-REFERENCE
+================================================================================
+
+This matrix maps audit problems to their solutions in Obsidian Audit.
+
+================================================================================
+AUDIT PROBLEM DOMAIN → FEATURE MAPPING
+================================================================================
+
+ENGAGEMENT PLANNING & INITIATION
+├─ Create/Define New Engagement
+│  └─ EngagementList (Wizard)
+├─ Engagement Information Hub
+│  └─ EngagementDetail (16-tab system)
+├─ Engagement Approval Process
+│  └─ ApprovalDashboard + EngagementDetail
+└─ Engagement Templates & Standards
+   └─ EngagementTemplates
+
+ENGAGEMENT MONITORING & CONTROL
+├─ Engagement Status Overview
+│  └─ EngagementList + EngagementDashboard
+├─ Budget & Time Tracking
+│  └─ EngagementDashboard + EngagementBudgetTab
+├─ Team Allocation & Utilization
+│  └─ EngagementDashboard + EngagementTeamTab + TaskBoard
+├─ Progress Monitoring
+│  └─ EngagementDashboard + ProgramAnalytics
+└─ Deadline & Alert Management
+   └─ EngagementDashboard + MyWorkspace
+
+RISK ASSESSMENT & DOCUMENTATION
+├─ Inherent Risk Assessment
+│  └─ RiskAssessments
+├─ Control Effectiveness Evaluation
+│  └─ RiskAssessments
+├─ Residual Risk Calculation
+│  └─ RiskAssessments
+├─ Risk Documentation (AU-C 315)
+│  └─ RiskAssessments + EngagementDetail
+└─ Risk-Based Procedure Scoping
+   └─ RiskAssessments → ProcedureLibrary
+
+AUDIT PLANNING & SCOPE
+├─ Materiality Determination (AU-C 320)
+│  └─ MaterialityCalculator
+├─ Audit Program Development
+│  └─ EngagementDetail (Program Tab) + ProcedureLibrary
+├─ Scope Definition
+│  └─ EngagementDetail (Scope Tab) + AuditUniverse
+└─ Universe Definition
+   └─ AuditUniverse
+
+PROCEDURE EXECUTION
+├─ Procedure Standardization
+│  └─ ProcedureLibrary
+├─ Procedure Assignment
+│  └─ ProcedureAssignment + TaskBoard
+├─ Procedure Status Tracking
+│  └─ MyProcedures + TaskBoard + EngagementDashboard
+├─ Work Coordination
+│  └─ TaskBoard + MyProcedures
+└─ Individual Task Management
+   └─ MyProcedures
+
+WORKPAPER CREATION & MANAGEMENT
+├─ Workpaper Documentation
+│  └─ AuditWorkpapers + WorkpaperEditor
+├─ Collaborative Editing
+│  └─ AuditWorkpapers (Real-time collaboration)
+├─ Workpaper Review
+│  └─ ReviewQueuePage + WorkpaperReviewPanel
+├─ Workpaper Approval
+│  └─ ReviewQueuePage
+├─ Template Standardization
+│  └─ WorkpaperTemplates
+└─ Version Control
+   └─ AuditWorkpapers
+
+EVIDENCE & CONFIRMATIONS (AU-C 505)
+├─ Confirmation Tracking
+│  └─ ConfirmationTracker
+├─ AR/AP/Bank/Legal Confirmations
+│  └─ ConfirmationTracker
+├─ Exception Investigation
+│  └─ ConfirmationTracker
+├─ Information Request Management
+│  └─ InformationRequests
+└─ Evidence Library
+   └─ EvidenceLibrary
+
+FINDINGS & ISSUES MANAGEMENT
+├─ Finding Documentation
+│  └─ FindingsManagement
+├─ Severity Classification
+│  └─ FindingsManagement
+├─ Status Tracking
+│  └─ FindingsManagement + EngagementDashboard
+├─ Remediation Deadline Management
+│  └─ FindingsManagement
+├─ Overdue Monitoring
+│  └─ FindingsManagement + EngagementDashboard
+└─ Procedure Linkage
+   └─ FindingsManagement ↔ MyProcedures
+
+ANALYTICAL PROCEDURES (AU-C 520)
+├─ Ratio Analysis
+│  └─ AnalyticalProcedures
+├─ Trend Analysis
+│  └─ AnalyticalProcedures
+├─ Variance Analysis
+│  └─ AnalyticalProcedures
+├─ Expectation Development
+│  └─ AnalyticalProcedures
+└─ Investigation Documentation
+   └─ AnalyticalProcedures
+
+STATISTICAL SAMPLING (AU-C 530)
+├─ Sample Size Determination
+│  └─ SamplingCalculator
+├─ MUS (Monetary Unit Sampling)
+│  └─ SamplingCalculator
+├─ Classical Variables Sampling
+│  └─ SamplingCalculator
+├─ Attributes Sampling
+│  └─ SamplingCalculator
+└─ Confidence Level Documentation
+   └─ SamplingCalculator
+
+QUALITY CONTROL & REVIEW
+├─ Workpaper Review Queue
+│  └─ ReviewQueuePage
+├─ Procedure Review Management
+│  └─ ReviewQueuePage
+├─ Review Status Tracking
+│  └─ ReviewQueuePage + EngagementDashboard
+├─ Change Requests & Feedback
+│  └─ ReviewQueuePage
+├─ Unresolved Notes Tracking
+│  └─ ReviewQueuePage
+├─ Review Priority Management
+│  └─ ReviewQueuePage
+└─ Multi-Level Approvals
+   └─ ReviewQueuePage + ApprovalDashboard
+
+REPORTING & DELIVERABLES
+├─ Deliverable Tracking
+│  └─ EngagementDetail (Deliverables Tab)
+├─ Communications Management
+│  └─ EngagementDetail (Communications Tab)
+├─ Change Order Management
+│  └─ EngagementDetail (Change Orders Tab)
+├─ Engagement Letter Generation
+│  └─ EngagementLetterGenerator
+└─ Calendar Management
+   └─ EngagementCalendar
+
+ADMINISTRATION & ACCESS CONTROL
+├─ User Management
+│  └─ UserManagement
+├─ Role-Based Access Control
+│  └─ Settings (Roles Tab) + UserManagement
+├─ Client Management
+│  └─ ClientsPage
+├─ License Management
+│  └─ Settings (Licenses Tab)
+├─ Organization Configuration
+│  └─ Settings (Organization Tab)
+└─ Audit Trail & Compliance
+   └─ Multiple features via Supabase audit
+
+COMMUNICATION & NOTIFICATIONS
+├─ Notification Management
+│  └─ InboxPage
+├─ Priority-Based Alerts
+│  └─ InboxPage
+├─ Deadline Reminders
+│  └─ InboxPage + EngagementDashboard
+├─ Status Change Notifications
+│  └─ InboxPage
+├─ Review Request Notifications
+│  └─ InboxPage + ReviewQueuePage
+└─ Assignment Notifications
+   └─ InboxPage
+
+DASHBOARDS & REPORTING
+├─ Engagement Dashboard
+│  └─ EngagementDashboard
+├─ Personal Workspace
+│  └─ MyWorkspace
+├─ Admin Dashboard
+│  └─ AdminDashboard
+├─ Review Queue Dashboard
+│  └─ ReviewQueuePage
+├─ Quality Control Dashboard
+│  └─ QualityControlDashboard
+└─ Program Analytics
+   └─ ProgramAnalytics
+
+================================================================================
+FEATURE → AUDIT PROBLEM MAPPING
+================================================================================
+
+AuditWorkpapers
+├─ Solves: Workpaper documentation, collaboration, evidence organization
+├─ Standards: AU-C 230 (Audit Documentation)
+└─ Inputs: Rich text, templates, team comments
+
+EngagementDashboard
+├─ Solves: Progress monitoring, bottleneck identification, deadline tracking
+├─ Standards: Overall monitoring and control
+└─ Displays: Completion %, overdue count, team utilization, budget variance
+
+EngagementDetail
+├─ Solves: Single source of truth, multi-phase workflow, information hub
+├─ Standards: AU-C 200 (Overall Objectives), 310 (Planning)
+└─ Contains: 16 tabs covering all audit phases
+
+FindingsManagement
+├─ Solves: Issue tracking, severity prioritization, remediation tracking
+├─ Standards: AU-C 260 (Matters Arising), 265 (Significant Deficiencies)
+└─ Tracks: Severity, status, deadlines, linkages
+
+MaterialityCalculator
+├─ Solves: Materiality determination, methodology consistency
+├─ Standards: AU-C 320 (Materiality)
+└─ Calculates: Overall, performance, clearly trivial thresholds
+
+ReviewQueuePage
+├─ Solves: Review workflow management, bottleneck visibility, approval tracking
+├─ Standards: AU-C 220 (Quality Control), AU-C 230 (Documentation)
+└─ Manages: Pending, in-review, changes-requested, approved items
+
+RiskAssessments
+├─ Solves: Risk documentation, control evaluation, risk-based scoping
+├─ Standards: AU-C 315 (Risk Assessment), 240 (Fraud)
+└─ Calculates: Inherent vs residual risk
+
+SamplingCalculator
+├─ Solves: Sample size determination, confidence documentation
+├─ Standards: AU-C 530 (Audit Sampling)
+└─ Supports: MUS, Classical Variables, Attributes sampling
+
+ConfirmationTracker
+├─ Solves: Confirmation tracking, exception management, evidence gathering
+├─ Standards: AU-C 505 (Confirmations), AS 2310 (PCAOB)
+└─ Tracks: AR, AP, Bank, Legal confirmations
+
+AnalyticalProcedures
+├─ Solves: Analytical procedure documentation, expectation development
+├─ Standards: AU-C 520 (Analytical Procedures)
+└─ Supports: Ratio, trend, variance analysis
+
+MyWorkspace
+├─ Solves: Information consolidation, context switching reduction
+├─ Standards: Overall UX and efficiency
+└─ Shows: Quick stats, my tasks, my engagements
+
+InboxPage
+├─ Solves: Communication centralization, alert prioritization
+├─ Standards: Overall coordination and communication
+└─ Supports: Multiple notification types and priorities
+
+UserManagement
+├─ Solves: Access control, role management, compliance
+├─ Standards: SOX, IT General Controls
+└─ Manages: Users, roles, permissions, client assignments
+
+AdminDashboard
+├─ Solves: Firm-level visibility, administrative centralization
+├─ Standards: Overall governance
+└─ Shows: User counts, client counts, engagement counts
+
+================================================================================
+DATA INTEGRATION MATRIX
+================================================================================
+
+Feature Integration Points:
+
+EngagementDashboard
+├─ Consumes: useEngagementContext, useProcedureExecution, useFindingManagement
+├─ Displays: Real-time stats from multiple sources
+└─ Links To: Procedures, Findings, Workpapers, Review, Budget
+
+ReviewQueuePage
+├─ Consumes: Workpapers, Procedures, Review Notes
+├─ Filters By: Status, Type, Priority, Preparer
+└─ Links To: Workpaper Editor, Procedure Details
+
+FindingsManagement
+├─ Creates: Finding records with audit/procedure linkage
+├─ Tracks: Status, severity, deadlines
+└─ Links To: Procedures, Audits, Findings Detail
+
+RiskAssessments
+├─ References: Audit entities, risk categories
+├─ Calculates: Inherent vs residual risk
+└─ Informs: Procedure scoping, risk-based testing
+
+TaskBoard
+├─ Aggregates: Tasks across engagements
+├─ Groups By: Status (Not Started, In Progress, In Review, Completed)
+└─ Links To: MyProcedures, Assignments
+
+MyProcedures
+├─ Filters: User's assigned procedures
+├─ Shows: Status, deadlines, related workpapers
+└─ Links To: Findings, Evidence, ReviewQueue
+
+================================================================================
+ROLE-BASED FEATURE ACCESS
+================================================================================
+
+Partner/Practice Leader
+├─ Full: EngagementDashboard, ReviewQueuePage, RiskAssessments, MyWorkspace
+├─ Approve: ApprovalDashboard, EngagementDetail, UserManagement
+└─ Manage: AdminDashboard, ClientsPage, Settings
+
+Engagement Manager
+├─ Full: EngagementDashboard, EngagementList, TaskBoard, ReviewQueuePage
+├─ Create: EngagementWizard, AuditWorkpapers, FindingsManagement
+└─ Assign: ProcedureAssignment, TaskBoard
+
+Senior Auditor
+├─ Full: MyProcedures, AuditWorkpapers, ReviewQueuePage
+├─ Create: FindingsManagement, AuditWorkpapers
+├─ Review: ReviewQueuePage
+└─ Calculate: MaterialityCalculator, SamplingCalculator
+
+Staff Auditor
+├─ Full: MyProcedures, AuditWorkpapers, TaskBoard
+├─ Create: AuditWorkpapers, FindingsManagement
+└─ Calculate: MaterialityCalculator (read-only), SamplingCalculator
+
+Admin
+├─ Full Access: All pages
+├─ Manage: UserManagement, AdminDashboard, Settings
+└─ Configure: Organization settings, Roles, Licenses
+
+================================================================================
+FEATURE DEPENDENCIES & PREREQUISITES
+================================================================================
+
+EngagementDetail
+└─ Requires: Active Engagement (from EngagementList or ApprovalDashboard)
+   └─ Requires: Client (from ClientsPage)
+
+AuditWorkpapers
+└─ Requires: Engagement (from EngagementDetail)
+   └─ Requires: Team Assignment (from EngagementTeamTab)
+
+ReviewQueuePage
+└─ Requires: Workpapers or Procedures (from creation pages)
+   └─ Requires: Assigned Reviewer (automatic or manual)
+
+FindingsManagement
+└─ Requires: Engagement (implicit context)
+   └─ Optional: Procedure context (for linkage)
+
+MaterialityCalculator
+└─ Requires: Engagement context (optional, for auto-population)
+   └─ Standalone: Can be used independently
+
+RiskAssessments
+└─ Requires: Audit context
+   └─ Optional: Engagement context
+
+================================================================================
+USER JOURNEY MAPS
+================================================================================
+
+PARTNER JOURNEY
+1. MyWorkspace (check status)
+2. EngagementDashboard (monitor active engagement)
+3. ReviewQueuePage (approve items)
+4. ApprovalDashboard (final approval)
+5. AdminDashboard (firm metrics)
+6. UserManagement (team oversight)
+
+MANAGER JOURNEY
+1. MyWorkspace (check assignments)
+2. EngagementList (select engagement)
+3. EngagementDashboard (monitor progress)
+4. TaskBoard (manage team workload)
+5. ReviewQueuePage (review workpapers)
+6. FindingsManagement (tracking issues)
+
+AUDITOR JOURNEY
+1. MyWorkspace (see my tasks)
+2. MyProcedures (see assigned procedures)
+3. AuditWorkpapers (create workpapers)
+4. FindingsManagement (log findings)
+5. ReviewQueuePage (receive feedback)
+6. EngagementDashboard (see overall progress)
+
+ADMIN JOURNEY
+1. AdminDashboard (firm overview)
+2. UserManagement (manage users)
+3. ClientsPage (manage clients)
+4. Settings (configure organization)
+
+================================================================================
+STANDARDS COMPLIANCE CHECKLIST
+================================================================================
+
+AU-C 200 - Overall Objectives
+├─ EngagementDetail, MyWorkspace
+└─ Status: COVERED
+
+AU-C 220 - Quality Control
+├─ ReviewQueuePage, ApprovalDashboard, QualityControlDashboard
+└─ Status: COVERED
+
+AU-C 230 - Audit Documentation
+├─ AuditWorkpapers, EvidenceLibrary
+└─ Status: COVERED
+
+AU-C 240 - Fraud Consideration
+├─ RiskAssessments, FindingsManagement
+└─ Status: COVERED
+
+AU-C 260 - Communication with Audit Committee
+├─ FindingsManagement, EngagementDetail
+└─ Status: COVERED
+
+AU-C 265 - Significant Deficiencies
+├─ FindingsManagement, RiskAssessments
+└─ Status: COVERED
+
+AU-C 300 - Planning
+├─ EngagementDetail (Planning tabs), MaterialityCalculator
+└─ Status: COVERED
+
+AU-C 315 - Risk Assessment
+├─ RiskAssessments, EngagementDetail
+└─ Status: COVERED
+
+AU-C 320 - Materiality
+├─ MaterialityCalculator
+└─ Status: FULLY COVERED
+
+AU-C 330 - Responding to Risks
+├─ ProcedureLibrary, ProcedureAssignment, MyProcedures
+└─ Status: COVERED
+
+AU-C 505 - Confirmations
+├─ ConfirmationTracker, InformationRequests
+└─ Status: FULLY COVERED
+
+AU-C 520 - Analytical Procedures
+├─ AnalyticalProcedures
+└─ Status: PARTIALLY COVERED
+
+AU-C 530 - Audit Sampling
+├─ SamplingCalculator
+└─ Status: PARTIALLY COVERED
+
+AS 2310 - PCAOB Confirmations
+├─ ConfirmationTracker
+└─ Status: COVERED
+
+SOX Compliance
+├─ UserManagement, ApprovalDashboard, Audit Trails
+└─ Status: COVERED
+
+================================================================================
+FEATURE COMPLETION STATUS
+================================================================================
+
+FULLY IMPLEMENTED (Production-Ready)
+✓ Engagement List
+✓ Engagement Dashboard
+✓ Engagement Detail (16 tabs)
+✓ Approval Dashboard
+✓ Audit Workpapers
+✓ Findings Management
+✓ Risk Assessments
+✓ Procedure Library
+✓ My Procedures
+✓ Task Board
+✓ Review Queue Page
+✓ User Management
+✓ Client Management
+✓ Admin Dashboard
+✓ Settings (7 tabs)
+✓ Inbox
+✓ Materiality Calculator
+✓ Confirmation Tracker
+✓ My Workspace
+✓ Landing Page
+
+IN DEVELOPMENT (Functional but May Need Enhancement)
+⧙ Sampling Calculator (UI present, calculations may be incomplete)
+⧙ Analytical Procedures (Framework present)
+⧙ Engagement Templates (Framework present)
+⧙ Evidence Library (Basic implementation)
+⧙ Information Requests (Basic implementation)
+⧙ Quality Control Dashboard (Metrics tracking)
+⧙ Program Analytics (Metrics tracking)
+⧙ Procedure Review Queue (Implied in ReviewQueuePage)
+
+PLANNED/FUTURE
+◊ Mobile applications
+◊ Advanced AI/ML integration
+◊ Enhanced analytics
+◊ Client portal
+◊ Blockchain audit trail
+◊ Automated reporting
+
+================================================================================

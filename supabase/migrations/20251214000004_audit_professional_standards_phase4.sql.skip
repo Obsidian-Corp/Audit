@@ -1,0 +1,864 @@
+-- =====================================================
+-- OBSIDIAN AUDIT PLATFORM - PROFESSIONAL STANDARDS PHASE 4
+-- Specialists/Experts, Group Audits, Accounting Estimates, Litigation
+-- Standards: AU-C 620, ISA 620 (Specialists)
+--            AU-C 600, ISA 600, PCAOB AS 1206 (Group Audits)
+--            AU-C 540, ISA 540 (Accounting Estimates)
+--            AU-C 501, PCAOB AS 2505 (Litigation & Claims)
+-- =====================================================
+
+-- =====================================================
+-- PART 1: SPECIALISTS/EXPERTS
+-- Standards: AU-C 620, ISA 620, PCAOB AS 1210
+-- =====================================================
+
+CREATE TABLE IF NOT EXISTS specialist_engagements (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  engagement_id UUID NOT NULL,
+  firm_id UUID NOT NULL,
+
+  -- Specialist Identification
+  specialist_type TEXT NOT NULL,
+  -- 'valuation', 'actuary', 'it_specialist', 'tax', 'legal', 'environmental',
+  -- 'real_estate', 'engineering', 'forensic', 'industry', 'other'
+  specialist_name TEXT NOT NULL,
+  specialist_firm TEXT,
+  specialist_credentials TEXT,
+  specialist_contact_email TEXT,
+  specialist_contact_phone TEXT,
+
+  -- Relationship Type
+  relationship_type TEXT NOT NULL,
+  -- 'auditor_engaged', 'management_engaged', 'internal'
+  internal_user_id UUID REFERENCES auth.users(id), -- If internal specialist
+
+  -- Need Assessment
+  reason_for_specialist TEXT NOT NULL,
+  area_of_work TEXT NOT NULL,
+  accounts_affected TEXT[],
+  amount_involved DECIMAL,
+  significance_to_audit TEXT,
+
+  -- COMPETENCE EVALUATION (per AU-C 620.09)
+  competence_evaluation JSONB,
+  /*
+  {
+    professional_certification: string,
+    license_or_registration: string,
+    membership_in_professional_body: string,
+    experience_in_field: string,
+    experience_with_type_of_work: string,
+    reputation_and_standing: string,
+    published_works_or_research: string,
+    adequacy_of_resources: string,
+    evaluation_conclusion: 'competent' | 'not_competent' | 'unable_to_evaluate'
+  }
+  */
+  competence_confirmed BOOLEAN,
+  competence_evaluation_date DATE,
+  competence_evaluated_by UUID REFERENCES auth.users(id),
+
+  -- OBJECTIVITY EVALUATION (per AU-C 620.11)
+  objectivity_evaluation JSONB,
+  /*
+  {
+    financial_interests_with_client: boolean,
+    business_relationships_with_client: boolean,
+    personal_relationships_with_client: boolean,
+    employment_relationships: boolean,
+    advocacy_threats: boolean,
+    threats_identified: string[],
+    safeguards_applied: string[],
+    evaluation_conclusion: 'objective' | 'threats_safeguarded' | 'not_objective'
+  }
+  */
+  objectivity_confirmed BOOLEAN,
+
+  -- SCOPE OF WORK
+  scope_of_work TEXT NOT NULL,
+  objectives_of_work TEXT NOT NULL,
+  assumptions_to_use TEXT,
+  data_to_use TEXT,
+  methods_to_apply TEXT,
+
+  -- ENGAGEMENT TERMS
+  terms_documented BOOLEAN DEFAULT false,
+  terms_date DATE,
+  terms_document_id UUID,
+  expected_completion_date DATE,
+  fee_arrangement TEXT,
+
+  -- WORK PERFORMED
+  work_description TEXT,
+  work_commenced_date DATE,
+  work_completed_date DATE,
+  deliverable_description TEXT,
+  deliverable_received BOOLEAN DEFAULT false,
+  deliverable_received_date DATE,
+  deliverable_document_id UUID,
+
+  -- EVALUATION OF WORK (per AU-C 620.12-13)
+  work_evaluation JSONB,
+  /*
+  {
+    source_data_adequate: boolean,
+    source_data_evaluation: string,
+    assumptions_reasonable: boolean,
+    assumptions_evaluation: string,
+    methods_appropriate: boolean,
+    methods_evaluation: string,
+    findings_consistent: boolean,
+    findings_evaluation: string,
+    limitations_identified: string[],
+    work_adequate_as_evidence: boolean
+  }
+  */
+
+  -- FINDINGS & CONCLUSIONS
+  specialist_findings_summary TEXT,
+  specialist_conclusions TEXT,
+  auditor_evaluation_of_findings TEXT,
+  findings_used_in_audit BOOLEAN,
+  findings_impact_on_opinion TEXT,
+
+  -- ISSUES
+  issues_identified BOOLEAN DEFAULT false,
+  issues_description TEXT,
+  issues_resolved BOOLEAN,
+  resolution_description TEXT,
+
+  -- Sign-offs
+  prepared_by UUID REFERENCES auth.users(id),
+  reviewed_by UUID REFERENCES auth.users(id),
+  reviewed_at TIMESTAMPTZ,
+
+  -- Status
+  status TEXT DEFAULT 'planning',
+  -- 'planning', 'engaged', 'work_in_progress', 'deliverable_received',
+  -- 'under_evaluation', 'completed'
+
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_specialists_engagement ON specialist_engagements(engagement_id);
+CREATE INDEX IF NOT EXISTS idx_specialists_firm ON specialist_engagements(firm_id);
+CREATE INDEX IF NOT EXISTS idx_specialists_type ON specialist_engagements(specialist_type);
+
+-- =====================================================
+-- PART 2: GROUP AUDITS
+-- Standards: AU-C 600, ISA 600, PCAOB AS 1206
+-- =====================================================
+
+-- Group Audit Components
+CREATE TABLE IF NOT EXISTS group_audit_components (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  engagement_id UUID NOT NULL, -- The group engagement
+  firm_id UUID NOT NULL,
+
+  -- Component Identification
+  component_name TEXT NOT NULL,
+  component_type TEXT NOT NULL,
+  -- 'subsidiary', 'division', 'branch', 'joint_venture', 'associate',
+  -- 'investment', 'shared_service_center', 'other'
+  component_location TEXT,
+  component_country TEXT,
+
+  -- Ownership & Consolidation
+  ownership_percentage DECIMAL,
+  voting_percentage DECIMAL,
+  consolidation_method TEXT,
+  -- 'full_consolidation', 'proportionate_consolidation', 'equity_method', 'cost_method'
+  consolidation_entries_required BOOLEAN DEFAULT true,
+
+  -- SIGNIFICANCE ASSESSMENT (per AS 1206 / ISA 600)
+  is_significant BOOLEAN NOT NULL DEFAULT false,
+  significance_criteria TEXT,
+  -- 'individually_financially_significant', 'significant_risk', 'specific_characteristics'
+  significance_rationale TEXT,
+
+  -- Financial Significance
+  component_total_assets DECIMAL,
+  component_total_revenue DECIMAL,
+  component_net_income DECIMAL,
+  percentage_of_group_assets DECIMAL,
+  percentage_of_group_revenue DECIMAL,
+  percentage_of_group_income DECIMAL,
+
+  -- Risk Assessment
+  component_risk_assessment TEXT, -- 'low', 'moderate', 'high'
+  significant_risks_identified TEXT[],
+  fraud_risks_identified TEXT[],
+
+  -- COMPONENT MATERIALITY
+  component_materiality DECIMAL,
+  component_performance_materiality DECIMAL,
+  component_trivial_threshold DECIMAL,
+  materiality_calculation_basis TEXT,
+
+  -- WORK TO BE PERFORMED
+  work_type TEXT NOT NULL,
+  -- 'full_scope_audit', 'audit_of_specific_items', 'specified_procedures',
+  -- 'analytical_procedures_only', 'no_work'
+  work_scope_description TEXT,
+  specific_accounts_to_audit TEXT[],
+  specific_procedures_required TEXT[],
+
+  -- COMPONENT AUDITOR
+  audited_by TEXT NOT NULL, -- 'group_team', 'network_firm', 'non_network_firm', 'not_audited'
+  component_auditor_firm_name TEXT,
+  component_auditor_contact TEXT,
+  component_auditor_email TEXT,
+
+  -- For Component Auditor Involvement
+  component_auditor_professional_body TEXT,
+  component_auditor_regulatory_oversight TEXT,
+
+  -- EVALUATION OF COMPONENT AUDITOR
+  evaluation_performed BOOLEAN DEFAULT false,
+  evaluation_date DATE,
+  evaluation_results JSONB,
+  /*
+  {
+    independence_confirmed: boolean,
+    professional_competence_confirmed: boolean,
+    regulatory_environment_understood: boolean,
+    communication_possible: boolean,
+    work_can_be_relied_upon: boolean,
+    issues_identified: string[],
+    safeguards_applied: string[]
+  }
+  */
+  can_rely_on_component_auditor BOOLEAN,
+
+  -- GROUP INSTRUCTIONS
+  instructions_issued BOOLEAN DEFAULT false,
+  instructions_date DATE,
+  instructions_document_id UUID,
+
+  -- COMPONENT REPORTING
+  reporting_deadline DATE,
+  report_received BOOLEAN DEFAULT false,
+  report_received_date DATE,
+  report_type TEXT, -- 'audit_report', 'long_form_report', 'memorandum', 'summary'
+  report_document_id UUID,
+
+  -- EVALUATION OF COMPONENT WORK
+  work_evaluation_completed BOOLEAN DEFAULT false,
+  work_evaluation_date DATE,
+  work_evaluation_conclusion TEXT,
+  -- 'satisfactory', 'satisfactory_with_issues', 'unsatisfactory'
+  additional_procedures_needed TEXT,
+  additional_procedures_performed TEXT,
+
+  -- ISSUES & FINDINGS
+  component_issues_identified BOOLEAN DEFAULT false,
+  component_issues_description TEXT,
+  misstatements_identified DECIMAL,
+  control_deficiencies_identified TEXT,
+  findings_communicated_to_group BOOLEAN DEFAULT false,
+
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_group_components_engagement ON group_audit_components(engagement_id);
+CREATE INDEX IF NOT EXISTS idx_group_components_firm ON group_audit_components(firm_id);
+CREATE INDEX IF NOT EXISTS idx_group_components_significant ON group_audit_components(is_significant);
+
+-- Group Instructions
+CREATE TABLE IF NOT EXISTS group_instructions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  engagement_id UUID NOT NULL,
+  component_id UUID NOT NULL REFERENCES group_audit_components(id),
+  firm_id UUID NOT NULL,
+
+  -- Instruction Details
+  instruction_date DATE NOT NULL,
+  version_number INTEGER NOT NULL DEFAULT 1,
+  supersedes_instruction_id UUID REFERENCES group_instructions(id),
+
+  -- Content Sections (per AS 1206 requirements)
+  engagement_overview JSONB,
+  /*
+  {
+    group_financial_statements: string,
+    reporting_framework: string,
+    report_date: date,
+    group_materiality: number,
+    component_materiality: number,
+    significant_risks: string[],
+    fraud_risks: string[]
+  }
+  */
+
+  work_to_perform JSONB NOT NULL,
+  /*
+  {
+    scope_description: string,
+    accounts_to_audit: string[],
+    procedures_required: string[],
+    sample_sizes: object,
+    assertions_to_test: string[]
+  }
+  */
+
+  reporting_requirements JSONB NOT NULL,
+  /*
+  {
+    report_format: string,
+    reporting_deadline: date,
+    clearance_meeting_date: date,
+    information_to_include: string[],
+    representations_required: string[]
+  }
+  */
+
+  communication_requirements JSONB NOT NULL,
+  /*
+  {
+    key_contacts: array,
+    communication_protocol: string,
+    matters_to_communicate_immediately: string[],
+    regular_update_frequency: string
+  }
+  */
+
+  ethical_requirements JSONB,
+  independence_requirements TEXT,
+  quality_control_requirements TEXT,
+
+  -- Status
+  status TEXT DEFAULT 'draft', -- 'draft', 'issued', 'acknowledged', 'superseded'
+  issued_date DATE,
+  issued_by UUID REFERENCES auth.users(id),
+
+  -- Acknowledgment
+  acknowledged BOOLEAN DEFAULT false,
+  acknowledged_date DATE,
+  acknowledged_by TEXT,
+  acknowledgment_document_id UUID,
+
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_group_instructions_engagement ON group_instructions(engagement_id);
+CREATE INDEX IF NOT EXISTS idx_group_instructions_component ON group_instructions(component_id);
+
+-- =====================================================
+-- PART 3: ACCOUNTING ESTIMATES
+-- Standards: AU-C 540, ISA 540 (Revised), PCAOB AS 2501
+-- =====================================================
+
+CREATE TABLE IF NOT EXISTS accounting_estimates (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  engagement_id UUID NOT NULL,
+  firm_id UUID NOT NULL,
+
+  -- Estimate Identification
+  estimate_reference TEXT, -- "EST-001"
+  estimate_name TEXT NOT NULL,
+  estimate_type TEXT NOT NULL,
+  -- 'allowance_doubtful_accounts', 'inventory_obsolescence', 'warranty_reserve',
+  -- 'impairment', 'fair_value', 'pension_obligation', 'environmental_liability',
+  -- 'litigation_reserve', 'valuation_allowance', 'goodwill_impairment',
+  -- 'stock_compensation', 'revenue_recognition', 'insurance_reserves', 'other'
+  financial_statement_line TEXT NOT NULL,
+  financial_statement_area TEXT,
+
+  -- Amounts
+  management_estimate DECIMAL NOT NULL,
+  prior_year_estimate DECIMAL,
+  prior_year_actual DECIMAL, -- Actual outcome of prior year estimate
+  variance_prior_year DECIMAL, -- Difference between estimate and actual
+
+  -- INHERENT RISK ASSESSMENT (per ISA 540 Revised)
+  estimation_uncertainty TEXT NOT NULL, -- 'low', 'moderate', 'high'
+  complexity TEXT NOT NULL, -- 'low', 'moderate', 'high'
+  subjectivity TEXT NOT NULL, -- 'low', 'moderate', 'high'
+  overall_inherent_risk TEXT NOT NULL, -- 'low', 'moderate', 'high', 'significant'
+  inherent_risk_rationale TEXT,
+
+  -- Is this a significant risk?
+  is_significant_risk BOOLEAN DEFAULT false,
+  significant_risk_rationale TEXT,
+
+  -- UNDERSTANDING MANAGEMENT'S PROCESS
+  management_method TEXT NOT NULL,
+  model_or_technique TEXT,
+  model_description TEXT,
+
+  -- Data Used
+  data_sources TEXT NOT NULL,
+  data_relevance_reliability TEXT,
+  data_completeness_confirmed BOOLEAN,
+
+  -- Key Assumptions
+  key_assumptions JSONB NOT NULL DEFAULT '[]',
+  /*
+  Array of {
+    assumption_name: string,
+    management_value: string,
+    basis_for_assumption: string,
+    sensitivity: 'low' | 'moderate' | 'high',
+    market_observable: boolean,
+    auditor_evaluation: string,
+    reasonableness_conclusion: 'reasonable' | 'within_range' | 'aggressive' | 'conservative' | 'not_reasonable'
+  }
+  */
+
+  -- SENSITIVITY ANALYSIS
+  sensitivity_performed BOOLEAN DEFAULT false,
+  sensitivity_analysis JSONB,
+  /*
+  {
+    scenarios: [{
+      scenario_name: string,
+      assumption_changed: string,
+      change_amount: string,
+      resulting_estimate: number,
+      difference_from_management: number,
+      impact_assessment: string
+    }],
+    overall_sensitivity: 'low' | 'moderate' | 'high',
+    conclusion: string
+  }
+  */
+
+  -- AUDITOR'S APPROACH
+  audit_approach TEXT NOT NULL,
+  -- 'test_management_process', 'develop_point_estimate', 'develop_range', 'combination'
+  approach_rationale TEXT,
+
+  -- Testing Management's Process
+  method_appropriate BOOLEAN,
+  method_evaluation TEXT,
+  calculations_accurate BOOLEAN,
+  data_complete_accurate BOOLEAN,
+  assumptions_reasonable BOOLEAN,
+  process_conclusion TEXT,
+
+  -- Independent Estimate (if developed)
+  auditor_point_estimate DECIMAL,
+  auditor_range_low DECIMAL,
+  auditor_range_high DECIMAL,
+  independent_estimate_method TEXT,
+  independent_estimate_rationale TEXT,
+
+  -- EVALUATION
+  management_estimate_within_range BOOLEAN,
+  is_reasonable BOOLEAN NOT NULL,
+  reasonableness_conclusion TEXT NOT NULL,
+
+  -- Bias Indicators
+  management_bias_indicators JSONB,
+  /*
+  {
+    indicators_evaluated: string[],
+    bias_identified: boolean,
+    bias_direction: 'aggressive' | 'conservative' | 'none',
+    bias_description: string,
+    impact_on_conclusion: string
+  }
+  */
+
+  -- MISSTATEMENT
+  misstatement_amount DECIMAL,
+  misstatement_type TEXT, -- 'factual', 'judgmental', 'projected'
+  adjustment_proposed BOOLEAN DEFAULT false,
+  adjustment_id UUID, -- Link to audit_adjustments
+
+  -- DISCLOSURE REVIEW
+  disclosure_requirements TEXT,
+  disclosure_adequate BOOLEAN,
+  disclosure_issues TEXT,
+
+  -- SPECIALIST INVOLVEMENT
+  specialist_required BOOLEAN DEFAULT false,
+  specialist_engagement_id UUID REFERENCES specialist_engagements(id),
+
+  -- RETROSPECTIVE REVIEW
+  retrospective_review_performed BOOLEAN DEFAULT false,
+  retrospective_review_results TEXT,
+  estimation_process_consistent BOOLEAN,
+  management_bias_pattern BOOLEAN DEFAULT false,
+
+  -- Documentation
+  evidence_document_ids UUID[],
+
+  -- Sign-offs
+  prepared_by UUID REFERENCES auth.users(id),
+  prepared_at TIMESTAMPTZ DEFAULT NOW(),
+  reviewed_by UUID REFERENCES auth.users(id),
+  reviewed_at TIMESTAMPTZ,
+
+  -- Status
+  status TEXT DEFAULT 'identified',
+  -- 'identified', 'risk_assessed', 'testing', 'evaluated', 'concluded'
+
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_estimates_engagement ON accounting_estimates(engagement_id);
+CREATE INDEX IF NOT EXISTS idx_estimates_firm ON accounting_estimates(firm_id);
+CREATE INDEX IF NOT EXISTS idx_estimates_type ON accounting_estimates(estimate_type);
+CREATE INDEX IF NOT EXISTS idx_estimates_significant ON accounting_estimates(is_significant_risk);
+
+-- =====================================================
+-- PART 4: LITIGATION & CLAIMS
+-- Standards: AU-C 501, PCAOB AS 2505
+-- =====================================================
+
+CREATE TABLE IF NOT EXISTS litigation_claims (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  engagement_id UUID NOT NULL,
+  firm_id UUID NOT NULL,
+  client_id UUID NOT NULL,
+
+  -- Matter Identification
+  matter_reference TEXT, -- "LIT-001"
+  matter_name TEXT NOT NULL,
+  matter_type TEXT NOT NULL,
+  -- 'litigation', 'claim', 'assessment', 'unasserted_claim', 'regulatory',
+  -- 'tax_dispute', 'environmental', 'product_liability', 'employment', 'ip', 'other'
+  matter_description TEXT NOT NULL,
+
+  -- Status
+  matter_status TEXT NOT NULL,
+  -- 'pending', 'settled', 'won', 'lost', 'appealed', 'withdrawn', 'dismissed'
+  date_initiated DATE,
+  date_resolved DATE,
+
+  -- Parties
+  opposing_party TEXT,
+  client_role TEXT, -- 'plaintiff', 'defendant', 'respondent', 'claimant'
+  jurisdiction TEXT,
+  case_number TEXT,
+
+  -- Legal Representation
+  attorney_name TEXT,
+  attorney_firm TEXT,
+  attorney_contact_email TEXT,
+  attorney_contact_phone TEXT,
+
+  -- FINANCIAL ASSESSMENT (per ASC 450)
+  likelihood_of_loss TEXT NOT NULL,
+  -- 'probable', 'reasonably_possible', 'remote'
+  loss_estimable BOOLEAN,
+  estimated_loss_low DECIMAL,
+  estimated_loss_high DECIMAL,
+  management_best_estimate DECIMAL,
+  estimation_basis TEXT,
+
+  -- For probable and estimable losses
+  accrual_required BOOLEAN,
+  accrued_amount DECIMAL,
+  accrual_account TEXT,
+  accrual_adequate BOOLEAN,
+
+  -- For reasonably possible or range situations
+  disclosure_required BOOLEAN,
+  disclosure_adequate BOOLEAN,
+  disclosure_location TEXT,
+
+  -- Potential gain contingency
+  gain_contingency BOOLEAN DEFAULT false,
+  potential_gain_amount DECIMAL,
+  gain_disclosed BOOLEAN,
+
+  -- ATTORNEY LETTER (AU-C 501)
+  attorney_letter_required BOOLEAN DEFAULT true,
+  attorney_letter_sent BOOLEAN DEFAULT false,
+  attorney_letter_sent_date DATE,
+  attorney_letter_sent_method TEXT,
+  attorney_letter_document_id UUID,
+
+  -- Attorney Response
+  attorney_response_received BOOLEAN DEFAULT false,
+  attorney_response_date DATE,
+  attorney_response_document_id UUID,
+
+  -- Attorney's Assertions
+  attorney_assessment_likelihood TEXT,
+  attorney_assessment_amount TEXT,
+  attorney_limitations TEXT,
+  attorney_refused_to_respond BOOLEAN DEFAULT false,
+  refusal_reason TEXT,
+
+  -- Comparison
+  attorney_management_consistent BOOLEAN,
+  differences_identified TEXT,
+  differences_resolved BOOLEAN,
+  differences_resolution TEXT,
+
+  -- Subsequent Developments
+  developments_after_period_end BOOLEAN DEFAULT false,
+  subsequent_developments TEXT,
+  subsequent_development_date DATE,
+  impact_on_assessment TEXT,
+
+  -- AUDITOR EVALUATION
+  management_assessment_reasonable BOOLEAN,
+  auditor_evaluation TEXT,
+  auditor_conclusion TEXT,
+
+  -- If Misstatement
+  misstatement_identified BOOLEAN DEFAULT false,
+  adjustment_id UUID, -- Link to audit_adjustments
+
+  -- Finding (if control issue or other)
+  finding_id UUID, -- Link to audit_findings
+
+  -- Evidence
+  evidence_document_ids UUID[],
+
+  -- Sign-offs
+  prepared_by UUID REFERENCES auth.users(id),
+  reviewed_by UUID REFERENCES auth.users(id),
+  reviewed_at TIMESTAMPTZ,
+
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_litigation_engagement ON litigation_claims(engagement_id);
+CREATE INDEX IF NOT EXISTS idx_litigation_firm ON litigation_claims(firm_id);
+CREATE INDEX IF NOT EXISTS idx_litigation_client ON litigation_claims(client_id);
+CREATE INDEX IF NOT EXISTS idx_litigation_likelihood ON litigation_claims(likelihood_of_loss);
+CREATE INDEX IF NOT EXISTS idx_litigation_status ON litigation_claims(matter_status);
+
+-- Attorney Letter Tracking
+CREATE TABLE IF NOT EXISTS attorney_letters (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  engagement_id UUID NOT NULL,
+  firm_id UUID NOT NULL,
+
+  -- Letter Type
+  letter_type TEXT NOT NULL, -- 'initial_inquiry', 'update', 'year_end', 'subsequent_events'
+  period_covered_start DATE,
+  period_covered_end DATE,
+
+  -- Recipients
+  primary_attorney_name TEXT NOT NULL,
+  primary_attorney_firm TEXT NOT NULL,
+  primary_attorney_email TEXT,
+  additional_recipients JSONB, -- Array of {name, firm, email}
+
+  -- Letter Content
+  letter_date DATE NOT NULL,
+  matters_included JSONB, -- Array of litigation_claim IDs
+  specific_inquiries TEXT,
+  letter_document_id UUID,
+
+  -- Sending
+  sent_date DATE,
+  sent_method TEXT, -- 'email', 'mail', 'portal', 'hand_delivered'
+  sent_by UUID REFERENCES auth.users(id),
+
+  -- Response
+  response_received BOOLEAN DEFAULT false,
+  response_date DATE,
+  response_document_id UUID,
+  response_summary TEXT,
+
+  -- Response Evaluation
+  response_adequate BOOLEAN,
+  response_limitations TEXT,
+  follow_up_required BOOLEAN DEFAULT false,
+  follow_up_date DATE,
+  follow_up_notes TEXT,
+
+  -- Overall
+  matters_disclosed_in_response INTEGER,
+  new_matters_identified INTEGER DEFAULT 0,
+  conclusions_consistent_with_management BOOLEAN,
+
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_attorney_letters_engagement ON attorney_letters(engagement_id);
+
+-- =====================================================
+-- PART 5: SUBSEQUENT EVENTS (Enhanced)
+-- Standards: AU-C 560, ISA 560
+-- =====================================================
+
+CREATE TABLE IF NOT EXISTS subsequent_events (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  engagement_id UUID NOT NULL,
+  firm_id UUID NOT NULL,
+
+  -- Event Identification
+  event_reference TEXT, -- "SE-001"
+  event_date DATE NOT NULL,
+  discovery_date DATE NOT NULL,
+  event_title TEXT NOT NULL,
+  event_description TEXT NOT NULL,
+
+  -- Classification
+  event_type TEXT NOT NULL, -- 'type_i_adjusting', 'type_ii_non_adjusting'
+  classification_rationale TEXT NOT NULL,
+
+  -- Type I (Adjusting Events)
+  condition_existed_at_balance_sheet_date BOOLEAN,
+  condition_description TEXT,
+
+  -- Impact Assessment
+  financial_statement_impact TEXT,
+  -- 'adjustment_required', 'disclosure_required', 'both', 'no_impact'
+  affected_accounts TEXT[],
+  affected_assertions TEXT[],
+  impact_amount DECIMAL,
+  impact_description TEXT,
+
+  -- For Type I - Adjustment
+  adjustment_made BOOLEAN,
+  adjustment_description TEXT,
+  adjustment_id UUID, -- Link to audit_adjustments
+
+  -- For Type II - Disclosure
+  disclosure_required BOOLEAN,
+  disclosure_adequate BOOLEAN,
+  disclosure_location TEXT,
+  disclosure_wording TEXT,
+  disclosure_issues TEXT,
+
+  -- Dual Dating (if applicable)
+  requires_dual_dating BOOLEAN DEFAULT false,
+  dual_date DATE,
+  dual_dating_scope TEXT,
+  dual_dating_paragraph TEXT,
+
+  -- If discovered after report date
+  discovered_after_report_date BOOLEAN DEFAULT false,
+  original_report_date DATE,
+  action_taken TEXT,
+  -- 'no_action', 'dual_date', 'reissue_report', 'notify_users', 'other'
+  action_description TEXT,
+
+  -- Procedures Performed
+  procedures_performed JSONB DEFAULT '[]',
+  /*
+  Array of {
+    procedure: string,
+    date_performed: date,
+    results: string
+  }
+  */
+
+  -- Evidence
+  evidence_obtained TEXT,
+  evidence_document_ids UUID[],
+
+  -- Management Representations
+  representation_obtained BOOLEAN DEFAULT false,
+  representation_details TEXT,
+
+  -- Sign-offs
+  identified_by UUID REFERENCES auth.users(id),
+  reviewed_by UUID REFERENCES auth.users(id),
+  partner_approved BOOLEAN DEFAULT false,
+  partner_approved_by UUID REFERENCES auth.users(id),
+  partner_approved_at TIMESTAMPTZ,
+
+  -- Status
+  status TEXT DEFAULT 'identified',
+  -- 'identified', 'evaluated', 'disclosed', 'adjusted', 'closed'
+
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_subsequent_events_engagement ON subsequent_events(engagement_id);
+CREATE INDEX IF NOT EXISTS idx_subsequent_events_type ON subsequent_events(event_type);
+
+-- =====================================================
+-- PART 6: RLS POLICIES
+-- =====================================================
+
+-- Enable RLS
+ALTER TABLE specialist_engagements ENABLE ROW LEVEL SECURITY;
+ALTER TABLE group_audit_components ENABLE ROW LEVEL SECURITY;
+ALTER TABLE group_instructions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE accounting_estimates ENABLE ROW LEVEL SECURITY;
+ALTER TABLE litigation_claims ENABLE ROW LEVEL SECURITY;
+ALTER TABLE attorney_letters ENABLE ROW LEVEL SECURITY;
+ALTER TABLE subsequent_events ENABLE ROW LEVEL SECURITY;
+
+-- Specialist Engagements policies
+CREATE POLICY "Users can view specialists in their firm"
+  ON specialist_engagements FOR SELECT
+  USING (firm_id IN (SELECT firm_id FROM firm_users WHERE user_id = auth.uid()));
+
+CREATE POLICY "Users can manage specialists in their firm"
+  ON specialist_engagements FOR ALL
+  USING (firm_id IN (SELECT firm_id FROM firm_users WHERE user_id = auth.uid()));
+
+-- Group Audit Components policies
+CREATE POLICY "Users can view group components in their firm"
+  ON group_audit_components FOR SELECT
+  USING (firm_id IN (SELECT firm_id FROM firm_users WHERE user_id = auth.uid()));
+
+CREATE POLICY "Users can manage group components in their firm"
+  ON group_audit_components FOR ALL
+  USING (firm_id IN (SELECT firm_id FROM firm_users WHERE user_id = auth.uid()));
+
+-- Group Instructions policies
+CREATE POLICY "Users can view group instructions in their firm"
+  ON group_instructions FOR SELECT
+  USING (firm_id IN (SELECT firm_id FROM firm_users WHERE user_id = auth.uid()));
+
+CREATE POLICY "Managers can manage group instructions"
+  ON group_instructions FOR ALL
+  USING (firm_id IN (SELECT firm_id FROM firm_users WHERE user_id = auth.uid() AND role IN ('admin', 'partner', 'manager')));
+
+-- Accounting Estimates policies
+CREATE POLICY "Users can view estimates in their firm"
+  ON accounting_estimates FOR SELECT
+  USING (firm_id IN (SELECT firm_id FROM firm_users WHERE user_id = auth.uid()));
+
+CREATE POLICY "Users can manage estimates in their firm"
+  ON accounting_estimates FOR ALL
+  USING (firm_id IN (SELECT firm_id FROM firm_users WHERE user_id = auth.uid()));
+
+-- Litigation Claims policies
+CREATE POLICY "Users can view litigation in their firm"
+  ON litigation_claims FOR SELECT
+  USING (firm_id IN (SELECT firm_id FROM firm_users WHERE user_id = auth.uid()));
+
+CREATE POLICY "Users can manage litigation in their firm"
+  ON litigation_claims FOR ALL
+  USING (firm_id IN (SELECT firm_id FROM firm_users WHERE user_id = auth.uid()));
+
+-- Attorney Letters policies
+CREATE POLICY "Users can view attorney letters in their firm"
+  ON attorney_letters FOR SELECT
+  USING (firm_id IN (SELECT firm_id FROM firm_users WHERE user_id = auth.uid()));
+
+CREATE POLICY "Users can manage attorney letters in their firm"
+  ON attorney_letters FOR ALL
+  USING (firm_id IN (SELECT firm_id FROM firm_users WHERE user_id = auth.uid()));
+
+-- Subsequent Events policies
+CREATE POLICY "Users can view subsequent events in their firm"
+  ON subsequent_events FOR SELECT
+  USING (firm_id IN (SELECT firm_id FROM firm_users WHERE user_id = auth.uid()));
+
+CREATE POLICY "Users can manage subsequent events in their firm"
+  ON subsequent_events FOR ALL
+  USING (firm_id IN (SELECT firm_id FROM firm_users WHERE user_id = auth.uid()));
+
+-- =====================================================
+-- MIGRATION COMPLETE
+-- =====================================================
+
+COMMENT ON TABLE specialist_engagements IS 'Specialist/expert engagements per AU-C 620 / ISA 620';
+COMMENT ON TABLE group_audit_components IS 'Group audit component tracking per AU-C 600 / ISA 600';
+COMMENT ON TABLE group_instructions IS 'Instructions to component auditors per AS 1206';
+COMMENT ON TABLE accounting_estimates IS 'Accounting estimates per AU-C 540 / ISA 540';
+COMMENT ON TABLE litigation_claims IS 'Litigation and claims per AU-C 501';
+COMMENT ON TABLE attorney_letters IS 'Attorney letter tracking per AU-C 501';
+COMMENT ON TABLE subsequent_events IS 'Subsequent events per AU-C 560 / ISA 560';

@@ -169,12 +169,12 @@ export function EngagementSidebar({ engagement }: EngagementSidebarProps) {
           <div>
             <div className="flex justify-between items-center text-sm mb-1">
               <span className="text-muted-foreground">Hours Logged</span>
-              <span className="font-medium">87 / {engagement?.budgeted_hours || 0}</span>
+              <span className="font-medium">87 / {engagement?.budget_hours || 0}</span>
             </div>
             <Progress
               value={
-                engagement?.budgeted_hours
-                  ? Math.min((87 / engagement.budgeted_hours) * 100, 100)
+                engagement?.budget_hours
+                  ? Math.min((87 / engagement.budget_hours) * 100, 100)
                   : 0
               }
               className="h-1.5"
@@ -259,7 +259,7 @@ export function EngagementSidebar({ engagement }: EngagementSidebarProps) {
         <CardContent className="space-y-2">
           {engagement?.client && (
             <>
-              <div className="text-sm font-medium">{engagement.client.name}</div>
+              <div className="text-sm font-medium">{engagement.client.client_name}</div>
               {engagement.client.contact_email && (
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                   <Mail className="h-3 w-3" />

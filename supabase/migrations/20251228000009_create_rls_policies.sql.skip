@@ -1,0 +1,437 @@
+-- =====================================================================
+-- MIGRATION: Create RLS policies for all tables
+-- Ticket: DB-009
+-- Purpose: Comprehensive Row Level Security policies ensuring
+--          firm isolation and proper access control
+-- =====================================================================
+
+-- =====================================================================
+-- HELPER FUNCTION: Get user's firm ID
+-- =====================================================================
+
+-- Ensure the helper function exists (may have been created in earlier migrations)
+CREATE OR REPLACE FUNCTION public.user_firm_id(user_id UUID)
+RETURNS UUID
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+AS $$
+  SELECT firm_id FROM public.profiles WHERE id = user_id LIMIT 1;
+$$;
+
+-- =====================================================================
+-- HELPER FUNCTION: Check if user is on engagement team
+-- =====================================================================
+
+CREATE OR REPLACE FUNCTION public.user_is_on_engagement_team(p_user_id UUID, p_engagement_id UUID)
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.audit_team_members
+    WHERE user_id = p_user_id
+      AND audit_id = p_engagement_id
+  );
+$$;
+
+-- =====================================================================
+-- HELPER FUNCTION: Check if user has role on engagement
+-- =====================================================================
+
+CREATE OR REPLACE FUNCTION public.user_has_engagement_role(
+  p_user_id UUID,
+  p_engagement_id UUID,
+  p_roles TEXT[]
+)
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.audit_team_members
+    WHERE user_id = p_user_id
+      AND audit_id = p_engagement_id
+      AND role = ANY(p_roles)
+  );
+$$;
+
+-- =====================================================================
+-- WORKPAPER_SIGNOFFS POLICIES
+-- Already created in DB-001, verify and add any missing
+-- =====================================================================
+
+-- Drop existing policies to recreate with consistent naming
+DROP POLICY IF EXISTS "Users can view signoffs in their firm" ON public.workpaper_signoffs;
+DROP POLICY IF EXISTS "Users can insert signoffs in their firm" ON public.workpaper_signoffs;
+DROP POLICY IF EXISTS "Admins can delete signoffs in their firm" ON public.workpaper_signoffs;
+
+-- Policy: View signoffs for workpapers in your firm
+CREATE POLICY "signoffs_select_firm"
+  ON public.workpaper_signoffs
+  FOR SELECT
+  TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1
+      FROM public.audit_workpapers wp
+      JOIN public.audits a ON a.id = wp.audit_id
+      WHERE wp.id = workpaper_signoffs.workpaper_id
+        AND a.firm_id = public.user_firm_id(auth.uid())
+    )
+  );
+
+-- Policy: Create signoffs for workpapers in engagements you're on
+CREATE POLICY "signoffs_insert_team"
+  ON public.workpaper_signoffs
+  FOR INSERT
+  TO authenticated
+  WITH CHECK (
+    -- User is inserting their own signoff
+    user_id = auth.uid()
+    AND EXISTS (
+      SELECT 1
+      FROM public.audit_workpapers wp
+      JOIN public.audits a ON a.id = wp.audit_id
+      WHERE wp.id = workpaper_id
+        AND a.firm_id = public.user_firm_id(auth.uid())
+        AND public.user_is_on_engagement_team(auth.uid(), a.id)
+    )
+  );
+
+-- Policy: Only admins/partners can delete signoffs
+CREATE POLICY "signoffs_delete_admin"
+  ON public.workpaper_signoffs
+  FOR DELETE
+  TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1
+      FROM public.audit_workpapers wp
+      JOIN public.audits a ON a.id = wp.audit_id
+      WHERE wp.id = workpaper_signoffs.workpaper_id
+        AND a.firm_id = public.user_firm_id(auth.uid())
+        AND public.user_has_engagement_role(auth.uid(), a.id, ARRAY['partner', 'manager'])
+    )
+  );
+
+-- =====================================================================
+-- REVIEW_NOTES POLICIES
+-- Already created in DB-002, verify and add any missing
+-- =====================================================================
+
+-- Drop existing policies
+DROP POLICY IF EXISTS "Users can view review notes in their firm" ON public.review_notes;
+DROP POLICY IF EXISTS "Users can create review notes in their firm" ON public.review_notes;
+DROP POLICY IF EXISTS "Users can update their own notes" ON public.review_notes;
+DROP POLICY IF EXISTS "Users can delete their own notes" ON public.review_notes;
+
+-- Policy: View notes for workpapers in your firm
+CREATE POLICY "review_notes_select_firm"
+  ON public.review_notes
+  FOR SELECT
+  TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1
+      FROM public.audit_workpapers wp
+      JOIN public.audits a ON a.id = wp.audit_id
+      WHERE wp.id = review_notes.workpaper_id
+        AND a.firm_id = public.user_firm_id(auth.uid())
+    )
+  );
+
+-- Policy: Create notes for workpapers in engagements you're on
+CREATE POLICY "review_notes_insert_team"
+  ON public.review_notes
+  FOR INSERT
+  TO authenticated
+  WITH CHECK (
+    EXISTS (
+      SELECT 1
+      FROM public.audit_workpapers wp
+      JOIN public.audits a ON a.id = wp.audit_id
+      WHERE wp.id = workpaper_id
+        AND a.firm_id = public.user_firm_id(auth.uid())
+        AND public.user_is_on_engagement_team(auth.uid(), a.id)
+    )
+  );
+
+-- Policy: Update your own notes or if you're a manager/partner
+CREATE POLICY "review_notes_update_owner"
+  ON public.review_notes
+  FOR UPDATE
+  TO authenticated
+  USING (
+    -- Own note
+    created_by = auth.uid()
+    OR
+    -- Manager/partner on the engagement
+    EXISTS (
+      SELECT 1
+      FROM public.audit_workpapers wp
+      JOIN public.audits a ON a.id = wp.audit_id
+      WHERE wp.id = review_notes.workpaper_id
+        AND public.user_has_engagement_role(auth.uid(), a.id, ARRAY['partner', 'manager'])
+    )
+  );
+
+-- Policy: Delete your own notes or if you're a manager/partner
+CREATE POLICY "review_notes_delete_owner"
+  ON public.review_notes
+  FOR DELETE
+  TO authenticated
+  USING (
+    -- Own note (within 24 hours)
+    (created_by = auth.uid() AND created_at > NOW() - INTERVAL '24 hours')
+    OR
+    -- Manager/partner on the engagement
+    EXISTS (
+      SELECT 1
+      FROM public.audit_workpapers wp
+      JOIN public.audits a ON a.id = wp.audit_id
+      WHERE wp.id = review_notes.workpaper_id
+        AND public.user_has_engagement_role(auth.uid(), a.id, ARRAY['partner', 'manager'])
+    )
+  );
+
+-- =====================================================================
+-- NOTIFICATIONS POLICIES
+-- Already created in DB-003, but let's ensure completeness
+-- =====================================================================
+
+-- Drop existing policies
+DROP POLICY IF EXISTS "Users can view own notifications" ON public.notifications;
+DROP POLICY IF EXISTS "System can insert notifications" ON public.notifications;
+DROP POLICY IF EXISTS "Users can update own notifications" ON public.notifications;
+DROP POLICY IF EXISTS "Users can delete own notifications" ON public.notifications;
+
+-- Policy: View only your own notifications
+CREATE POLICY "notifications_select_own"
+  ON public.notifications
+  FOR SELECT
+  TO authenticated
+  USING (user_id = auth.uid());
+
+-- Policy: System/triggers can insert (using SECURITY DEFINER functions)
+-- For direct inserts, user can only create for themselves
+CREATE POLICY "notifications_insert"
+  ON public.notifications
+  FOR INSERT
+  TO authenticated
+  WITH CHECK (user_id = auth.uid() OR current_user = 'postgres');
+
+-- Policy: Update only your own notifications (mark read, etc.)
+CREATE POLICY "notifications_update_own"
+  ON public.notifications
+  FOR UPDATE
+  TO authenticated
+  USING (user_id = auth.uid())
+  WITH CHECK (user_id = auth.uid());
+
+-- Policy: Delete only your own notifications
+CREATE POLICY "notifications_delete_own"
+  ON public.notifications
+  FOR DELETE
+  TO authenticated
+  USING (user_id = auth.uid());
+
+-- =====================================================================
+-- WORKPAPER_REFERENCES POLICIES
+-- Already created in DB-004, but let's ensure completeness
+-- =====================================================================
+
+-- Policies were already created in DB-004, skipping to avoid duplicates
+
+-- =====================================================================
+-- AUDIT_WORKPAPERS ENHANCED POLICIES
+-- Ensure proper access control with new columns
+-- =====================================================================
+
+-- Add policy for locking workpapers (only partner/manager can lock)
+DROP POLICY IF EXISTS "workpapers_lock_manager" ON public.audit_workpapers;
+
+-- Note: This policy needs to be created if workpapers don't have it
+-- For now, we'll rely on the trigger created in DB-005 to prevent edits
+
+-- =====================================================================
+-- AUDIT_PROCEDURES POLICIES
+-- Ensure team members can work on procedures
+-- =====================================================================
+
+-- Check if policies exist and add if missing
+DO $$
+BEGIN
+  -- Add policy for updating procedure status
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE tablename = 'audit_procedures'
+      AND policyname = 'procedures_update_team'
+  ) THEN
+    EXECUTE '
+      CREATE POLICY "procedures_update_team"
+        ON public.audit_procedures
+        FOR UPDATE
+        TO authenticated
+        USING (
+          EXISTS (
+            SELECT 1 FROM public.audits a
+            WHERE a.id = audit_procedures.engagement_id
+              AND a.firm_id = public.user_firm_id(auth.uid())
+              AND public.user_is_on_engagement_team(auth.uid(), a.id)
+          )
+        )';
+  END IF;
+END $$;
+
+-- =====================================================================
+-- AUDIT_FINDINGS POLICIES
+-- Ensure proper access for findings
+-- =====================================================================
+
+DO $$
+BEGIN
+  -- Add policy for viewing findings
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE tablename = 'audit_findings'
+      AND policyname = 'findings_select_firm'
+  ) THEN
+    EXECUTE '
+      CREATE POLICY "findings_select_firm"
+        ON public.audit_findings
+        FOR SELECT
+        TO authenticated
+        USING (
+          EXISTS (
+            SELECT 1 FROM public.audits a
+            WHERE a.id = audit_findings.engagement_id
+              AND a.firm_id = public.user_firm_id(auth.uid())
+          )
+        )';
+  END IF;
+
+  -- Add policy for creating findings
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE tablename = 'audit_findings'
+      AND policyname = 'findings_insert_team'
+  ) THEN
+    EXECUTE '
+      CREATE POLICY "findings_insert_team"
+        ON public.audit_findings
+        FOR INSERT
+        TO authenticated
+        WITH CHECK (
+          EXISTS (
+            SELECT 1 FROM public.audits a
+            WHERE a.id = engagement_id
+              AND a.firm_id = public.user_firm_id(auth.uid())
+              AND public.user_is_on_engagement_team(auth.uid(), a.id)
+          )
+        )';
+  END IF;
+
+  -- Add policy for updating findings
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE tablename = 'audit_findings'
+      AND policyname = 'findings_update_team'
+  ) THEN
+    EXECUTE '
+      CREATE POLICY "findings_update_team"
+        ON public.audit_findings
+        FOR UPDATE
+        TO authenticated
+        USING (
+          EXISTS (
+            SELECT 1 FROM public.audits a
+            WHERE a.id = audit_findings.engagement_id
+              AND a.firm_id = public.user_firm_id(auth.uid())
+              AND public.user_is_on_engagement_team(auth.uid(), a.id)
+          )
+        )';
+  END IF;
+END $$;
+
+-- =====================================================================
+-- ENGAGEMENT_ACTIVITY POLICIES
+-- =====================================================================
+
+-- Enable RLS on engagement_activity if not already enabled
+ALTER TABLE IF EXISTS public.engagement_activity ENABLE ROW LEVEL SECURITY;
+
+DO $$
+BEGIN
+  -- Check if table exists first
+  IF EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name = 'engagement_activity'
+  ) THEN
+    -- Add select policy
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_policies
+      WHERE tablename = 'engagement_activity'
+        AND policyname = 'activity_select_firm'
+    ) THEN
+      EXECUTE '
+        CREATE POLICY "activity_select_firm"
+          ON public.engagement_activity
+          FOR SELECT
+          TO authenticated
+          USING (
+            EXISTS (
+              SELECT 1 FROM public.audits a
+              WHERE a.id = engagement_activity.engagement_id
+                AND a.firm_id = public.user_firm_id(auth.uid())
+            )
+          )';
+    END IF;
+
+    -- Add insert policy (system/triggers only via SECURITY DEFINER)
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_policies
+      WHERE tablename = 'engagement_activity'
+        AND policyname = 'activity_insert_team'
+    ) THEN
+      EXECUTE '
+        CREATE POLICY "activity_insert_team"
+          ON public.engagement_activity
+          FOR INSERT
+          TO authenticated
+          WITH CHECK (
+            EXISTS (
+              SELECT 1 FROM public.audits a
+              WHERE a.id = engagement_id
+                AND a.firm_id = public.user_firm_id(auth.uid())
+                AND public.user_is_on_engagement_team(auth.uid(), a.id)
+            )
+          )';
+    END IF;
+  END IF;
+END $$;
+
+-- =====================================================================
+-- GRANT PERMISSIONS
+-- =====================================================================
+
+-- Ensure authenticated users can use helper functions
+GRANT EXECUTE ON FUNCTION public.user_firm_id(UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.user_is_on_engagement_team(UUID, UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.user_has_engagement_role(UUID, UUID, TEXT[]) TO authenticated;
+
+-- Success message
+DO $$
+BEGIN
+  RAISE NOTICE '✅ DB-009: RLS policies created successfully';
+  RAISE NOTICE '   - Created helper functions for firm and team checks';
+  RAISE NOTICE '   - Created workpaper_signoffs policies';
+  RAISE NOTICE '   - Created review_notes policies';
+  RAISE NOTICE '   - Created notifications policies';
+  RAISE NOTICE '   - Verified audit_procedures policies';
+  RAISE NOTICE '   - Verified audit_findings policies';
+  RAISE NOTICE '   - Created engagement_activity policies';
+  RAISE NOTICE '   - Granted function permissions to authenticated users';
+END $$;

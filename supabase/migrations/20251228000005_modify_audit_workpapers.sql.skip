@@ -1,0 +1,166 @@
+-- =====================================================================
+-- MIGRATION: Modify audit_workpapers table
+-- Ticket: DB-005
+-- Purpose: Add review workflow columns for sign-off tracking,
+--          current reviewer assignment, and workpaper locking
+-- =====================================================================
+
+-- Add review_status column with CHECK constraint
+-- This replaces/augments the existing 'status' column for more granular tracking
+ALTER TABLE public.audit_workpapers
+  ADD COLUMN IF NOT EXISTS review_status VARCHAR(50) DEFAULT 'draft'
+    CHECK (review_status IN (
+      'draft',           -- Initial state, being worked on
+      'pending_review',  -- Submitted for review
+      'in_review',       -- Reviewer has opened it
+      'changes_requested', -- Reviewer requested changes
+      'approved',        -- All required sign-offs complete
+      'locked'           -- Final, no further edits allowed
+    ));
+
+-- Add prepared_at timestamp (when preparer submitted)
+ALTER TABLE public.audit_workpapers
+  ADD COLUMN IF NOT EXISTS prepared_at TIMESTAMPTZ;
+
+-- Add current_reviewer_id for tracking who is actively reviewing
+ALTER TABLE public.audit_workpapers
+  ADD COLUMN IF NOT EXISTS current_reviewer_id UUID REFERENCES auth.users(id) ON DELETE SET NULL;
+
+-- Add locked_at and locked_by for final lock status
+ALTER TABLE public.audit_workpapers
+  ADD COLUMN IF NOT EXISTS locked_at TIMESTAMPTZ;
+
+ALTER TABLE public.audit_workpapers
+  ADD COLUMN IF NOT EXISTS locked_by UUID REFERENCES auth.users(id) ON DELETE SET NULL;
+
+-- Add workpaper_reference for human-readable cross-references (e.g., "WP-A-1")
+ALTER TABLE public.audit_workpapers
+  ADD COLUMN IF NOT EXISTS workpaper_reference VARCHAR(50);
+
+-- Add content_hash for integrity verification during sign-off
+ALTER TABLE public.audit_workpapers
+  ADD COLUMN IF NOT EXISTS content_hash VARCHAR(256);
+
+-- Add engagement_id alias (for consistency with design doc)
+-- Note: The table uses audit_id, we'll add engagement_id as a computed/alias approach
+-- For now, we'll keep audit_id but ensure queries work with both
+
+-- Create indexes for new columns
+CREATE INDEX IF NOT EXISTS idx_workpapers_review_status
+  ON public.audit_workpapers(review_status);
+
+CREATE INDEX IF NOT EXISTS idx_workpapers_current_reviewer
+  ON public.audit_workpapers(current_reviewer_id)
+  WHERE current_reviewer_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_workpapers_locked
+  ON public.audit_workpapers(locked_at)
+  WHERE locked_at IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_workpapers_pending_review
+  ON public.audit_workpapers(audit_id, review_status)
+  WHERE review_status IN ('pending_review', 'in_review');
+
+-- Migrate existing status values to review_status
+-- Map: draft -> draft, in_review -> pending_review, approved -> approved, rejected -> changes_requested
+UPDATE public.audit_workpapers
+SET review_status = CASE
+  WHEN status = 'draft' THEN 'draft'
+  WHEN status = 'in_review' THEN 'pending_review'
+  WHEN status = 'approved' THEN 'approved'
+  WHEN status = 'rejected' THEN 'changes_requested'
+  WHEN status IS NULL THEN 'draft'
+  ELSE 'draft'
+END
+WHERE review_status IS NULL OR review_status = 'draft';
+
+-- Backfill prepared_at from prepared_date for existing records
+UPDATE public.audit_workpapers
+SET prepared_at = prepared_date::TIMESTAMPTZ
+WHERE prepared_at IS NULL AND prepared_date IS NOT NULL;
+
+-- Generate workpaper_reference for existing workpapers that don't have one
+-- Format: WP-[section letter]-[number] based on reference_number
+UPDATE public.audit_workpapers
+SET workpaper_reference = 'WP-' || COALESCE(SUBSTRING(reference_number FROM 1 FOR 5), 'GEN-' || id::TEXT)
+WHERE workpaper_reference IS NULL;
+
+-- Create trigger to prevent edits on locked workpapers
+CREATE OR REPLACE FUNCTION prevent_locked_workpaper_edit()
+RETURNS TRIGGER AS $$
+BEGIN
+  -- Allow if not yet locked
+  IF OLD.locked_at IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  -- Allow only specific columns to be updated on locked workpapers
+  IF (
+    NEW.locked_at IS DISTINCT FROM OLD.locked_at OR
+    NEW.locked_by IS DISTINCT FROM OLD.locked_by OR
+    NEW.review_status IS DISTINCT FROM OLD.review_status
+  ) THEN
+    -- These fields can be modified by admins for unlock scenarios
+    RETURN NEW;
+  END IF;
+
+  -- Check if content is being modified
+  IF (
+    NEW.content IS DISTINCT FROM OLD.content OR
+    NEW.title IS DISTINCT FROM OLD.title OR
+    NEW.attachments IS DISTINCT FROM OLD.attachments
+  ) THEN
+    RAISE EXCEPTION 'Cannot modify locked workpaper. Workpaper was locked at % by user %',
+      OLD.locked_at, OLD.locked_by;
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Drop trigger if exists and recreate
+DROP TRIGGER IF EXISTS trigger_prevent_locked_workpaper_edit ON public.audit_workpapers;
+
+CREATE TRIGGER trigger_prevent_locked_workpaper_edit
+  BEFORE UPDATE ON public.audit_workpapers
+  FOR EACH ROW
+  EXECUTE FUNCTION prevent_locked_workpaper_edit();
+
+-- Create function to compute content hash
+CREATE OR REPLACE FUNCTION compute_workpaper_content_hash(p_workpaper_id UUID)
+RETURNS VARCHAR(256)
+LANGUAGE plpgsql
+STABLE
+AS $$
+DECLARE
+  v_content TEXT;
+  v_hash VARCHAR(256);
+BEGIN
+  -- Get the content as text
+  SELECT COALESCE(content::TEXT, '') || COALESCE(title, '')
+  INTO v_content
+  FROM public.audit_workpapers
+  WHERE id = p_workpaper_id;
+
+  -- Return MD5 hash (PostgreSQL built-in, sufficient for integrity checks)
+  RETURN MD5(v_content);
+END;
+$$;
+
+-- Add comments for documentation
+COMMENT ON COLUMN public.audit_workpapers.review_status IS 'Sign-off workflow status: draft, pending_review, in_review, changes_requested, approved, locked';
+COMMENT ON COLUMN public.audit_workpapers.current_reviewer_id IS 'User currently assigned to review this workpaper';
+COMMENT ON COLUMN public.audit_workpapers.locked_at IS 'Timestamp when workpaper was locked (after partner sign-off)';
+COMMENT ON COLUMN public.audit_workpapers.locked_by IS 'User who locked the workpaper (typically partner)';
+COMMENT ON COLUMN public.audit_workpapers.workpaper_reference IS 'Human-readable reference code for cross-referencing (e.g., WP-A-1)';
+COMMENT ON COLUMN public.audit_workpapers.content_hash IS 'Hash of content at time of sign-off for integrity verification';
+
+-- Success message
+DO $$
+BEGIN
+  RAISE NOTICE '✅ DB-005: audit_workpapers table modified successfully';
+  RAISE NOTICE '   - Added review_status column with workflow states';
+  RAISE NOTICE '   - Added reviewer and lock tracking columns';
+  RAISE NOTICE '   - Created locked workpaper edit prevention trigger';
+  RAISE NOTICE '   - Migrated existing status values';
+END $$;

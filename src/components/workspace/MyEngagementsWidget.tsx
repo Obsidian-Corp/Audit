@@ -40,12 +40,12 @@ export function MyEngagementsWidget() {
           audit_number,
           status,
           current_phase,
-          budgeted_hours,
+          budget_hours,
           hours_spent,
           planned_end_date,
-          client:clients(id, name),
-          partner:profiles!lead_auditor_id(id, full_name),
-          manager:profiles!manager_id(id, full_name)
+          lead_auditor_id,
+          manager_id,
+          client:clients(id, client_name)
         `
         )
         .or(`lead_auditor_id.eq.${user?.id},manager_id.eq.${user?.id}`)
@@ -75,13 +75,13 @@ export function MyEngagementsWidget() {
   };
 
   const getRole = (engagement: any) => {
-    if (engagement.partner?.id === user?.id) return 'Partner';
-    if (engagement.manager?.id === user?.id) return 'Manager';
+    if (engagement.lead_auditor_id === user?.id) return 'Partner';
+    if (engagement.manager_id === user?.id) return 'Manager';
     return 'Team Member';
   };
 
   const getBudgetStatus = (engagement: any) => {
-    const budgetHours = engagement.budgeted_hours || 0;
+    const budgetHours = engagement.budget_hours || 0;
     const hoursSpent = engagement.hours_spent || 0;
     if (budgetHours === 0) return { percent: 0, variant: 'default' };
 
@@ -151,7 +151,7 @@ export function MyEngagementsWidget() {
                         <div className="flex-1">
                           <h3 className="font-semibold">{engagement.audit_title}</h3>
                           <div className="flex items-center gap-2 mt-1 text-sm text-muted-foreground">
-                            <span>{engagement.client?.name || 'No client'}</span>
+                            <span>{engagement.client?.client_name || 'No client'}</span>
                             <span>•</span>
                             <span>{engagement.audit_number}</span>
                           </div>
@@ -221,7 +221,7 @@ export function MyEngagementsWidget() {
                         <div className="flex justify-between text-sm mb-2">
                           <span className="text-muted-foreground">Budget Progress</span>
                           <span className="font-medium">
-                            {engagement.hours_spent || 0} / {engagement.budgeted_hours || 0} hrs (
+                            {engagement.hours_spent || 0} / {engagement.budget_hours || 0} hrs (
                             {Math.round(budgetStatus.percent)}%)
                           </span>
                         </div>

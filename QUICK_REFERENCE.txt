@@ -1,0 +1,490 @@
+================================================================================
+OBSIDIAN AUDIT PLATFORM - QUICK REFERENCE GUIDE
+================================================================================
+
+PROJECT: Enterprise Audit Execution Engine
+LOCATION: /Users/abdulkarimsankareh/Downloads/Work-Projects/Obsidian/Audit
+TECH STACK: React 18 + TypeScript + Supabase + Tailwind CSS
+DATABASE: 150+ PostgreSQL tables
+COMPONENTS: 243 React files
+HOOKS: 98 custom hooks
+ROUTES: 38 protected routes
+
+================================================================================
+DATABASE TABLES (Key Groups)
+================================================================================
+
+CORE ENGAGEMENT:
+- engagements (core container)
+- clients (external parties)
+- engagement_deliverables (audit outputs)
+- engagement_letters (professional docs)
+
+AUDIT PROGRAMS:
+- audit_programs (templates)
+- audit_procedures (individual procedures)
+- engagement_procedures (assigned to specific engagement)
+- audit_program_templates (reusable structures)
+
+WORKPAPERS & EVIDENCE:
+- audit_workpapers (rich text working papers)
+- audit_evidence (supporting documents)
+- audit_findings (exceptions identified)
+- workpaper_comments (review comments)
+- workpaper_versions (version history)
+
+RISK & MATERIALITY:
+- risk_assessments (engagement-level risk)
+- risk_areas (granular risk by account/area)
+- control_walkthroughs (control testing)
+- materiality_calculations (history of calculations)
+
+QUALITY CONTROL:
+- quality_control_reviews (QC procedures)
+- approval_workflows (configurable approval chains)
+- approval_stages (individual approval steps)
+- deliverable_approvals (track approval progress)
+
+AUDIT TOOLS:
+- materiality_calculations (benchmark + % = materiality)
+- sampling_selections (sample creation & tracking)
+- trial_balance_data (account-level data)
+- confirmation_trackers (confirmation procedure status)
+- benfords_law_analyses (fraud detection)
+- analytical_procedures (ratio/trend analysis)
+
+USER & ACCESS:
+- profiles (user profiles)
+- user_roles (role assignments)
+- firms (multi-tenant organization)
+
+PROFESSIONAL STANDARDS:
+- engagement_acceptance_checklists (AU-C 210)
+- independence_declarations (audit standards)
+- conflict_of_interest_register (COI tracking)
+- client_aml_records (anti-money laundering)
+
+AI & AUTOMATION:
+- ai_agents (configurable AI bots)
+- ai_workflows (multi-step automation)
+- ai_executions (execution history & costs)
+- ai_prompts (prompt library)
+
+================================================================================
+APPLICATION ROUTES (38 total)
+================================================================================
+
+PUBLIC ROUTES:
+/                           - Landing page
+/auth/login                - Login
+/auth/signup               - Register
+/auth/forgot-password      - Reset password
+/auth/accept-invite/:token - Join as user
+/auth/accept-firm-invite   - Join as firm
+
+MAIN WORKSPACE:
+/workspace                 - My Workspace (dashboard)
+
+ENGAGEMENT MANAGEMENT (Primary Workflow):
+/engagements               - List all engagements
+/engagements/:id           - Engagement detail (general)
+/engagements/:id/audit     - Engagement detail (audit-specific)
+/engagements/:id/assign-procedures - Assign procedures to team
+/engagements/templates     - Engagement templates
+/engagements/approvals     - Approval dashboard
+
+AUDIT EXECUTION:
+/universe                  - Audit universe (entity mapping)
+/risks                     - Risk assessments
+/plans                     - Audit plans
+/audits                    - Active audits list
+/audits/:auditId/workpapers - Workpapers for audit
+
+PROGRAMS & PROCEDURES:
+/programs                  - Program library
+/programs/:id              - Program detail
+/procedures                - All procedures
+/my-procedures             - My assigned procedures
+
+WORKPAPERS & EVIDENCE:
+/workpapers                - Workpapers landing
+/workpapers/:id            - Workpaper editor (rich text)
+/findings                  - Findings management
+/evidence                  - Evidence library
+
+QUALITY & REVIEW:
+/review-queue              - Procedures pending review
+/quality-control           - QC dashboard
+
+TASKS & COORDINATION:
+/tasks                     - Task board
+/information-requests      - Client info requests
+
+ANALYTICS:
+/analytics                 - Program/engagement metrics
+
+AUDIT TOOLS (Specialized Calculators):
+/tools/materiality         - Materiality calculator
+/tools/sampling            - Sample size calculator
+/tools/confirmations       - Confirmation tracker
+/tools/analytical-procedures - Analytical procedures
+
+SETTINGS & ADMIN:
+/settings                  - User settings
+/admin                     - Admin dashboard [partner/admin only]
+/admin/users               - User management [partner/admin only]
+
+================================================================================
+COMPONENT STRUCTURE (243 files)
+================================================================================
+
+/components/ui/                - 50+ Radix UI + Tailwind primitives
+/components/engagement/        - Engagement management UI
+/components/audit/             - Audit programs, procedures, risk
+/components/audit-tools/       - Materiality, sampling, tools
+/components/settings/          - Organization & team settings
+/components/admin/             - Admin dashboards & user management
+/components/workspace/         - Dashboard widgets
+/components/shared/            - Reusable business components
+/components/guards/            - Auth & permission guards
+/components/layouts/           - Page layouts
+/components/documents/         - File upload/management
+/components/error/             - Error handling
+/components/reporting/         - Report generation
+/components/portal/            - Client portal components
+
+================================================================================
+CUSTOM HOOKS (98 files)
+================================================================================
+
+ENGAGEMENT HOOKS:
+- useEngagement() - CRUD operations
+- useEngagementWorkflow() - Workflow state machine
+- useEngagementAcceptance() - Acceptance checklist
+- useEngagementTemplates() - Template operations
+- useEngagementChangeOrders() - Change order tracking
+
+PROCEDURE HOOKS:
+- useProcedures() - Browse & search
+- useProcedureWorkflow() - Status transitions
+- useEngagementProcedures() - Assignment
+- useProgramAnalytics() - Metrics & KPIs
+
+WORKPAPER HOOKS:
+- useWorkpapers() - CRUD
+- useWorkpaperCollaboration() - Real-time updates
+- useProfessionalStandards() - Signoff & audit trail
+
+AUDIT TOOLS:
+- useMateriality() - Materiality calculations
+- useSampling() - Sample selection
+- useTrialBalance() - TB import & analysis
+- useConfirmations() - Confirmation tracking
+- useBenfordsLawAnalysis() - Fraud detection
+
+QUALITY CONTROL:
+- useQualityControl() - QC workflow
+- useControlTesting() - Control testing
+
+FINDINGS:
+- useFindings() - Finding management
+- useFindingsAnalytics() - Trend analysis
+
+REPORTING:
+- useAuditReporting() - Report generation
+- useGoingConcern() - Going concern assessment
+
+ADMIN:
+- useUsers() - User management
+- usePermissions() - Permission checks
+- useImpersonation() - Admin impersonation
+
+REAL-TIME:
+- useRealtimeSubscription() - Supabase subscriptions
+- useDashboardRealtime() - Live metric updates
+
+OTHER:
+- useExcelImport() - Excel parsing & import
+- useDocumentStorage() - File management
+
+================================================================================
+GLOBAL CONTEXTS (4 providers)
+================================================================================
+
+1. AuthContext
+   - user, session, profile
+   - roles: AppRole[]
+   - currentOrganization (firm)
+   - signIn(), signUp(), signOut()
+   - hasRole(), hasPermission()
+
+2. TenantContext
+   - firmId, firmSlug, firmName
+   - logoUrl, primaryColor
+   - portalType (admin | app | client)
+   - isCustomDomain
+   - Multi-tenant detection from hostname
+
+3. PlatformContext
+   - isPlatformAdmin: boolean
+   - featureFlags: Record<string, boolean>
+   - systemHealth, version
+   - notificationChannels
+
+4. OrganizationContext
+   - organization settings
+   - customRoles
+   - permissions
+   - updateSettings()
+
+================================================================================
+ROLE HIERARCHY
+================================================================================
+
+INTERNAL (Firm Users):
+- partner                    (top-level access)
+- firm_administrator         (admin access)
+- practice_leader            (strategic oversight)
+- engagement_manager         (manage engagements)
+- senior_auditor             (review & oversight)
+- staff_auditor              (execution)
+- business_development       (sales/BD)
+- quality_control_reviewer   (independent QC)
+
+EXTERNAL (Client Portal):
+- client_administrator       (contact manager)
+- client_user               (information requestor)
+
+================================================================================
+KEY PATTERNS & CONVENTIONS
+================================================================================
+
+DATA FETCHING:
+const { data, isLoading, error } = useQuery({
+  queryKey: ['key', id],
+  queryFn: () => supabase.from('table').select('*')
+})
+
+MUTATIONS:
+const { mutate } = useMutation({
+  mutationFn: updateFn,
+  onSuccess: () => queryClient.invalidateQueries(['key'])
+})
+
+FORMS (React Hook Form + Zod):
+const schema = z.object({ field: z.string() })
+const form = useForm({ resolver: zodResolver(schema) })
+
+UI COMPONENTS:
+All from /components/ui/ - Radix primitives + Tailwind
+No custom CSS files - use Tailwind utilities
+
+STYLING:
+- Semantic colors: bg-background, text-foreground, border-border
+- Spacing grid: 4px (p-4, mb-6, gap-3)
+- Responsive: hidden md:block
+- Dark mode: built-in via next-themes
+
+PROTECTION:
+<RequireAuth>                           {/* Auth required */}
+<RequireRole allowedRoles={['partner']}> {/* Specific role */}
+<PermissionGate permission="action">     {/* Feature access */}
+
+================================================================================
+TECHNOLOGY STACK
+================================================================================
+
+FRONTEND:
+- React 18.3.1 (UI library)
+- TypeScript 5.8.3 (type safety)
+- Vite 5.4.19 (bundler)
+- React Router 6.30.1 (routing)
+
+STATE:
+- TanStack React Query 5.83.0 (server state)
+- React Hook Form 7.61.1 (form state)
+- Zustand (global state)
+- Supabase 2.79.0 (backend)
+
+UI:
+- Radix UI (headless components)
+- Tailwind CSS 3.4.17 (styling)
+- lucide-react (icons)
+- Framer Motion (animations)
+
+EDITORS & VISUALIZATION:
+- TipTap (rich text editor)
+- Recharts (charts)
+- XLSX (Excel import/export)
+- jsPDF (PDF generation)
+
+DEV TOOLS:
+- ESLint + Prettier (linting)
+- Vitest (testing)
+- Husky (git hooks)
+- TypeScript ESLint (TS linting)
+
+================================================================================
+ARCHITECTURE HIGHLIGHTS
+================================================================================
+
+MULTI-TENANT:
+- Every user → one firm
+- Every row → firm_id
+- RLS policies enforce tenant isolation
+- TenantContext provides firm context
+
+ENGAGEMENT-CENTRIC:
+- All work flows through engagement
+- Related features embedded in engagement context
+- Reduces orphaned routes (83% accessible per design doc)
+
+PROCEDURE-DRIVEN:
+- Procedures define what to audit
+- Workpapers collect evidence
+- Multi-level review workflow
+- Professional standards compliance built-in
+
+PROFESSIONAL STANDARDS:
+- AU-C compliance (engagement letters, acceptance)
+- Tick marks library
+- Audit trail (immutable logs)
+- Multi-level sign-offs
+- Independence tracking
+- COI register
+
+REAL-TIME COLLABORATION:
+- Supabase real-time subscriptions
+- Live workpaper updates
+- Comment threading
+- Conflict resolution (last-write-wins)
+
+QUALITY CONTROL:
+- Multiple approval gates
+- QC independent review
+- Policy-based access control
+- Audit log for compliance
+
+AI & AUTOMATION:
+- Configurable AI agents
+- Workflow automation
+- Prompt library
+- Cost tracking per execution
+
+================================================================================
+DATABASE RELATIONSHIPS (Key Flows)
+================================================================================
+
+Engagement Creation:
+engagement (id, firm_id, client_id)
+  ↓
+engagement_programs (link to programs)
+  ↓
+engagement_procedures (assign procedures to team)
+  ↓
+audit_workpapers (create for each procedure)
+  ↓
+audit_evidence (attach supporting docs)
+  ↓
+workpaper_comments (review & comment)
+  ↓
+workpaper_signoffs (multi-level approval)
+  ↓
+audit_findings (document exceptions)
+  ↓
+deliverable_approvals (final approval chain)
+
+Risk & Materiality Flow:
+engagement
+  ↓
+risk_assessments (overall risk)
+  ↓
+risk_areas (account-level risk)
+  ↓
+materiality_calculations (benchmark-based)
+  ↓
+control_walkthroughs (control testing)
+  ↓
+sampling_selections (determine sample size)
+  ↓
+analytical_procedures (substantive testing)
+  ↓
+audit_findings (document issues found)
+
+Quality Control Flow:
+audit_workpapers
+  ↓
+quality_control_reviews (independent QC)
+  ↓
+approval_workflows (multi-stage approval)
+  ↓
+approval_stages (each stage)
+  ↓
+approval_records (individual decisions)
+  ↓
+audit_logs (audit trail for compliance)
+
+================================================================================
+ENVIRONMENTAL NOTES
+================================================================================
+
+- Supabase configured via /src/integrations/supabase/client.ts
+- Types auto-generated from Supabase: /src/integrations/supabase/types.ts
+- All queries tenant-scoped (firm_id filter)
+- RLS policies enforce at database level
+- Recent migrations focus on:
+  * Firm invitations & onboarding
+  * Email templates & notifications
+  * Multi-tenant support
+  * AI automation infrastructure
+  * Organization ID consolidation (latest)
+
+================================================================================
+KEY FILES TO REVIEW FIRST
+================================================================================
+
+1. src/App.tsx - Main router and route definitions
+2. src/contexts/AuthContext.tsx - Auth & user state
+3. src/contexts/TenantContext.tsx - Multi-tenant logic
+4. src/components/AppSidebar.tsx - Navigation structure
+5. src/integrations/supabase/types.ts - Database schema (auto-generated)
+6. src/hooks/useEngagement.tsx - Engagement operations
+7. src/hooks/useProcedureWorkflow.ts - Procedure execution
+8. src/hooks/useWorkpapers.tsx - Workpaper management
+9. src/hooks/useMateriality.ts - Materiality calculations
+10. src/pages/engagement/EngagementDetail.tsx - Engagement view
+
+================================================================================
+COMMON DEVELOPMENT TASKS
+================================================================================
+
+ADD NEW ROUTE:
+1. Create page component in src/pages/
+2. Import in src/App.tsx
+3. Add <Route> definition
+4. Update AppSidebar.tsx navigation
+5. Test auth & role guards
+
+FETCH DATA FROM API:
+1. Use useQuery from React Query
+2. Include tenant filter: .eq('firm_id', firmId)
+3. Add error handling in onError callback
+4. Invalidate cache on mutations
+
+CREATE FORM:
+1. Define Zod schema
+2. Create useForm with zodResolver
+3. Add field components
+4. Submit with useMutation
+5. Show toast on success/error
+
+ADD NEW COMPONENT:
+1. Create in appropriate folder (/components/*)
+2. Export from folder's index.ts
+3. Follow naming: *Card.tsx, *Form.tsx, etc.
+4. Use Tailwind for styling
+5. Add TypeScript props interface
+
+================================================================================
+END OF QUICK REFERENCE
+================================================================================

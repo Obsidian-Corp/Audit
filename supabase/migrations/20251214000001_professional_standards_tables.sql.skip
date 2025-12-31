@@ -1,0 +1,589 @@
+-- ============================================================================
+-- Migration: Professional Standards Tables
+-- Description: Creates tables for AU-C 550 (Related Parties), AU-C 580
+-- (Management Representations), AU-C 260/265 (TCWG Communications),
+-- Document Metadata, Trial Balance, and Audit History/Changelog
+-- ============================================================================
+
+-- ============================================================================
+-- TABLE: RELATED PARTIES (AU-C 550)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS public.related_parties (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  firm_id UUID NOT NULL REFERENCES public.firms(id) ON DELETE CASCADE,
+  engagement_id UUID NOT NULL REFERENCES public.engagements(id) ON DELETE CASCADE,
+  party_name TEXT NOT NULL,
+  relationship_type TEXT NOT NULL CHECK (relationship_type IN (
+    'owner_shareholder', 'key_management', 'family_member', 'affiliate',
+    'subsidiary', 'joint_venture', 'pension_plan', 'other'
+  )),
+  relationship_description TEXT NOT NULL,
+  ownership_percentage DECIMAL(5,2),
+  contact_name TEXT,
+  contact_info TEXT,
+  identified_date DATE NOT NULL DEFAULT CURRENT_DATE,
+  identified_by UUID REFERENCES auth.users(id),
+  is_disclosed BOOLEAN DEFAULT false,
+  disclosure_note_reference TEXT,
+  risk_assessment TEXT DEFAULT 'medium' CHECK (risk_assessment IN ('low', 'medium', 'high')),
+  notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_related_parties_engagement ON public.related_parties(engagement_id);
+CREATE INDEX idx_related_parties_risk ON public.related_parties(risk_assessment);
+ALTER TABLE public.related_parties ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can manage related parties" ON public.related_parties
+  FOR ALL TO authenticated
+  USING (public.is_org_member(auth.uid(), firm_id));
+
+-- ============================================================================
+-- TABLE: RELATED PARTY TRANSACTIONS
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS public.related_party_transactions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  firm_id UUID NOT NULL REFERENCES public.firms(id) ON DELETE CASCADE,
+  engagement_id UUID NOT NULL REFERENCES public.engagements(id) ON DELETE CASCADE,
+  related_party_id UUID NOT NULL REFERENCES public.related_parties(id) ON DELETE CASCADE,
+  transaction_type TEXT NOT NULL CHECK (transaction_type IN (
+    'sale', 'purchase', 'loan', 'guarantee', 'lease', 'service',
+    'compensation', 'dividend', 'other'
+  )),
+  transaction_description TEXT NOT NULL,
+  transaction_date DATE NOT NULL,
+  amount DECIMAL(15,2) NOT NULL,
+  is_recurring BOOLEAN DEFAULT false,
+  terms_description TEXT,
+  arms_length_analysis TEXT,
+  is_arms_length BOOLEAN,
+  requires_disclosure BOOLEAN DEFAULT true,
+  is_disclosed BOOLEAN DEFAULT false,
+  tested BOOLEAN DEFAULT false,
+  test_result TEXT,
+  workpaper_reference TEXT,
+  created_by UUID REFERENCES auth.users(id),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_rp_transactions_engagement ON public.related_party_transactions(engagement_id);
+CREATE INDEX idx_rp_transactions_party ON public.related_party_transactions(related_party_id);
+CREATE INDEX idx_rp_transactions_tested ON public.related_party_transactions(tested);
+ALTER TABLE public.related_party_transactions ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can manage related party transactions" ON public.related_party_transactions
+  FOR ALL TO authenticated
+  USING (public.is_org_member(auth.uid(), firm_id));
+
+-- ============================================================================
+-- TABLE: MANAGEMENT REPRESENTATION LETTERS (AU-C 580)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS public.management_representation_letters (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  firm_id UUID NOT NULL REFERENCES public.firms(id) ON DELETE CASCADE,
+  engagement_id UUID NOT NULL REFERENCES public.engagements(id) ON DELETE CASCADE,
+  letter_date DATE NOT NULL,
+  period_end_date DATE NOT NULL,
+  addressee TEXT NOT NULL,
+  client_name TEXT NOT NULL,
+  client_signatory_name TEXT NOT NULL,
+  client_signatory_title TEXT NOT NULL,
+  representations JSONB NOT NULL DEFAULT '[]',
+  custom_representations JSONB DEFAULT '[]',
+  status TEXT DEFAULT 'draft' CHECK (status IN ('draft', 'sent', 'received', 'acknowledged')),
+  sent_date TIMESTAMPTZ,
+  received_date TIMESTAMPTZ,
+  signed_copy_url TEXT,
+  notes TEXT,
+  created_by UUID REFERENCES auth.users(id),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_rep_letters_engagement ON public.management_representation_letters(engagement_id);
+CREATE INDEX idx_rep_letters_status ON public.management_representation_letters(status);
+ALTER TABLE public.management_representation_letters ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can manage representation letters" ON public.management_representation_letters
+  FOR ALL TO authenticated
+  USING (public.is_org_member(auth.uid(), firm_id));
+
+-- ============================================================================
+-- TABLE: TCWG COMMUNICATIONS (AU-C 260)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS public.tcwg_communications (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  firm_id UUID NOT NULL REFERENCES public.firms(id) ON DELETE CASCADE,
+  engagement_id UUID NOT NULL REFERENCES public.engagements(id) ON DELETE CASCADE,
+  communication_date DATE NOT NULL,
+  communication_type TEXT NOT NULL CHECK (communication_type IN (
+    'meeting', 'letter', 'email', 'phone', 'presentation', 'other'
+  )),
+  topic TEXT NOT NULL,
+  description TEXT NOT NULL,
+  attendees JSONB DEFAULT '[]',
+  method TEXT NOT NULL CHECK (method IN ('written', 'oral', 'both')),
+  required_topic_id TEXT,
+  governance_response TEXT,
+  follow_up_required BOOLEAN DEFAULT false,
+  follow_up_date DATE,
+  follow_up_completed BOOLEAN DEFAULT false,
+  supporting_documents JSONB DEFAULT '[]',
+  created_by UUID REFERENCES auth.users(id),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_tcwg_comm_engagement ON public.tcwg_communications(engagement_id);
+CREATE INDEX idx_tcwg_comm_date ON public.tcwg_communications(communication_date);
+CREATE INDEX idx_tcwg_comm_required ON public.tcwg_communications(required_topic_id);
+ALTER TABLE public.tcwg_communications ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can manage TCWG communications" ON public.tcwg_communications
+  FOR ALL TO authenticated
+  USING (public.is_org_member(auth.uid(), firm_id));
+
+-- ============================================================================
+-- TABLE: CONTROL DEFICIENCY COMMUNICATIONS (AU-C 265)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS public.control_deficiency_communications (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  firm_id UUID NOT NULL REFERENCES public.firms(id) ON DELETE CASCADE,
+  engagement_id UUID NOT NULL REFERENCES public.engagements(id) ON DELETE CASCADE,
+  deficiency_type TEXT NOT NULL CHECK (deficiency_type IN (
+    'material_weakness', 'significant_deficiency', 'other'
+  )),
+  description TEXT NOT NULL,
+  affected_area TEXT NOT NULL,
+  communicated_to_management BOOLEAN DEFAULT false,
+  management_communication_date TIMESTAMPTZ,
+  communicated_to_tcwg BOOLEAN DEFAULT false,
+  tcwg_communication_date TIMESTAMPTZ,
+  management_response TEXT,
+  remediation_plan TEXT,
+  status TEXT DEFAULT 'identified' CHECK (status IN (
+    'identified', 'communicated', 'remediated', 'ongoing'
+  )),
+  created_by UUID REFERENCES auth.users(id),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_control_def_engagement ON public.control_deficiency_communications(engagement_id);
+CREATE INDEX idx_control_def_type ON public.control_deficiency_communications(deficiency_type);
+CREATE INDEX idx_control_def_status ON public.control_deficiency_communications(status);
+ALTER TABLE public.control_deficiency_communications ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can manage control deficiency communications" ON public.control_deficiency_communications
+  FOR ALL TO authenticated
+  USING (public.is_org_member(auth.uid(), firm_id));
+
+-- ============================================================================
+-- TABLE: DOCUMENT METADATA
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS public.document_metadata (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  firm_id UUID NOT NULL REFERENCES public.firms(id) ON DELETE CASCADE,
+  engagement_id UUID NOT NULL REFERENCES public.engagements(id) ON DELETE CASCADE,
+  file_name TEXT NOT NULL,
+  file_path TEXT NOT NULL,
+  file_size BIGINT NOT NULL,
+  file_type TEXT NOT NULL,
+  category TEXT NOT NULL CHECK (category IN (
+    'workpaper', 'supporting_document', 'client_pbc', 'correspondence',
+    'signed_letter', 'audit_report', 'management_letter', 'confirmation',
+    'representation_letter', 'engagement_letter', 'other'
+  )),
+  description TEXT,
+  uploaded_by UUID REFERENCES auth.users(id),
+  uploaded_at TIMESTAMPTZ DEFAULT NOW(),
+  version INTEGER DEFAULT 1,
+  previous_version_id UUID REFERENCES public.document_metadata(id),
+  workpaper_reference TEXT,
+  is_archived BOOLEAN DEFAULT false,
+  tags JSONB DEFAULT '[]',
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_doc_metadata_engagement ON public.document_metadata(engagement_id);
+CREATE INDEX idx_doc_metadata_category ON public.document_metadata(category);
+CREATE INDEX idx_doc_metadata_archived ON public.document_metadata(is_archived);
+CREATE INDEX idx_doc_metadata_file_path ON public.document_metadata(file_path);
+ALTER TABLE public.document_metadata ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can manage document metadata" ON public.document_metadata
+  FOR ALL TO authenticated
+  USING (public.is_org_member(auth.uid(), firm_id));
+
+-- ============================================================================
+-- TABLE: TRIAL BALANCES
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS public.trial_balances (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  firm_id UUID NOT NULL REFERENCES public.firms(id) ON DELETE CASCADE,
+  engagement_id UUID NOT NULL REFERENCES public.engagements(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  period_end_date DATE NOT NULL,
+  period_type TEXT NOT NULL CHECK (period_type IN ('year_end', 'interim', 'prior_year')),
+  status TEXT DEFAULT 'draft' CHECK (status IN ('draft', 'imported', 'mapped', 'reviewed', 'finalized')),
+  source TEXT CHECK (source IN ('manual', 'csv_import', 'excel_import', 'integration')),
+  total_debits DECIMAL(15,2) DEFAULT 0,
+  total_credits DECIMAL(15,2) DEFAULT 0,
+  is_balanced BOOLEAN DEFAULT true,
+  imported_by UUID REFERENCES auth.users(id),
+  imported_at TIMESTAMPTZ,
+  reviewed_by UUID REFERENCES auth.users(id),
+  reviewed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_trial_balances_engagement ON public.trial_balances(engagement_id);
+CREATE INDEX idx_trial_balances_status ON public.trial_balances(status);
+ALTER TABLE public.trial_balances ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can manage trial balances" ON public.trial_balances
+  FOR ALL TO authenticated
+  USING (public.is_org_member(auth.uid(), firm_id));
+
+-- ============================================================================
+-- TABLE: TRIAL BALANCE ACCOUNTS
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS public.trial_balance_accounts (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  firm_id UUID NOT NULL REFERENCES public.firms(id) ON DELETE CASCADE,
+  trial_balance_id UUID NOT NULL REFERENCES public.trial_balances(id) ON DELETE CASCADE,
+  account_number TEXT NOT NULL,
+  account_name TEXT NOT NULL,
+  account_type TEXT CHECK (account_type IN (
+    'asset', 'liability', 'equity', 'revenue', 'expense'
+  )),
+  fs_classification TEXT,
+  debit_balance DECIMAL(15,2) DEFAULT 0,
+  credit_balance DECIMAL(15,2) DEFAULT 0,
+  prior_year_balance DECIMAL(15,2) DEFAULT 0,
+  adjustments DECIMAL(15,2) DEFAULT 0,
+  reclassifications DECIMAL(15,2) DEFAULT 0,
+  final_balance DECIMAL(15,2) DEFAULT 0,
+  lead_schedule_ref TEXT,
+  notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_tb_accounts_trial_balance ON public.trial_balance_accounts(trial_balance_id);
+CREATE INDEX idx_tb_accounts_type ON public.trial_balance_accounts(account_type);
+CREATE INDEX idx_tb_accounts_number ON public.trial_balance_accounts(account_number);
+ALTER TABLE public.trial_balance_accounts ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can manage trial balance accounts" ON public.trial_balance_accounts
+  FOR ALL TO authenticated
+  USING (public.is_org_member(auth.uid(), firm_id));
+
+-- ============================================================================
+-- TABLE: LEAD SCHEDULES
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS public.lead_schedules (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  firm_id UUID NOT NULL REFERENCES public.firms(id) ON DELETE CASCADE,
+  engagement_id UUID NOT NULL REFERENCES public.engagements(id) ON DELETE CASCADE,
+  trial_balance_id UUID REFERENCES public.trial_balances(id) ON DELETE SET NULL,
+  schedule_number TEXT NOT NULL,
+  schedule_name TEXT NOT NULL,
+  account_area TEXT NOT NULL,
+  prior_year_total DECIMAL(15,2) DEFAULT 0,
+  current_year_total DECIMAL(15,2) DEFAULT 0,
+  adjustments_total DECIMAL(15,2) DEFAULT 0,
+  reclassifications_total DECIMAL(15,2) DEFAULT 0,
+  final_total DECIMAL(15,2) DEFAULT 0,
+  conclusion TEXT,
+  prepared_by UUID REFERENCES auth.users(id),
+  prepared_at TIMESTAMPTZ,
+  reviewed_by UUID REFERENCES auth.users(id),
+  reviewed_at TIMESTAMPTZ,
+  status TEXT DEFAULT 'draft' CHECK (status IN ('draft', 'prepared', 'reviewed', 'signed_off')),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_lead_schedules_engagement ON public.lead_schedules(engagement_id);
+CREATE INDEX idx_lead_schedules_tb ON public.lead_schedules(trial_balance_id);
+CREATE INDEX idx_lead_schedules_status ON public.lead_schedules(status);
+ALTER TABLE public.lead_schedules ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can manage lead schedules" ON public.lead_schedules
+  FOR ALL TO authenticated
+  USING (public.is_org_member(auth.uid(), firm_id));
+
+-- ============================================================================
+-- TABLE: SUBSEQUENT EVENTS (AU-C 560)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS public.subsequent_events (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  firm_id UUID NOT NULL REFERENCES public.firms(id) ON DELETE CASCADE,
+  engagement_id UUID NOT NULL REFERENCES public.engagements(id) ON DELETE CASCADE,
+  event_date DATE NOT NULL,
+  event_type TEXT NOT NULL CHECK (event_type IN ('type_1', 'type_2')),
+  description TEXT NOT NULL,
+  impact_on_financials TEXT,
+  disclosure_required BOOLEAN DEFAULT false,
+  adjustment_required BOOLEAN DEFAULT false,
+  adjustment_amount DECIMAL(15,2),
+  resolution_status TEXT DEFAULT 'identified' CHECK (resolution_status IN (
+    'identified', 'assessing', 'resolved', 'pending_client'
+  )),
+  resolution_notes TEXT,
+  identified_by UUID REFERENCES auth.users(id),
+  identified_at TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_subsequent_events_engagement ON public.subsequent_events(engagement_id);
+CREATE INDEX idx_subsequent_events_type ON public.subsequent_events(event_type);
+CREATE INDEX idx_subsequent_events_status ON public.subsequent_events(resolution_status);
+ALTER TABLE public.subsequent_events ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can manage subsequent events" ON public.subsequent_events
+  FOR ALL TO authenticated
+  USING (public.is_org_member(auth.uid(), firm_id));
+
+-- ============================================================================
+-- TABLE: AUDIT HISTORY / CHANGELOG
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS public.audit_history (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  firm_id UUID NOT NULL REFERENCES public.firms(id) ON DELETE CASCADE,
+  engagement_id UUID REFERENCES public.engagements(id) ON DELETE CASCADE,
+  table_name TEXT NOT NULL,
+  record_id UUID NOT NULL,
+  action TEXT NOT NULL CHECK (action IN ('INSERT', 'UPDATE', 'DELETE')),
+  old_values JSONB,
+  new_values JSONB,
+  changed_fields JSONB,
+  changed_by UUID REFERENCES auth.users(id),
+  changed_at TIMESTAMPTZ DEFAULT NOW(),
+  ip_address INET,
+  user_agent TEXT
+);
+
+CREATE INDEX idx_audit_history_engagement ON public.audit_history(engagement_id);
+CREATE INDEX idx_audit_history_table ON public.audit_history(table_name);
+CREATE INDEX idx_audit_history_record ON public.audit_history(record_id);
+CREATE INDEX idx_audit_history_action ON public.audit_history(action);
+CREATE INDEX idx_audit_history_changed_by ON public.audit_history(changed_by);
+CREATE INDEX idx_audit_history_changed_at ON public.audit_history(changed_at);
+ALTER TABLE public.audit_history ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can view their firm audit history" ON public.audit_history
+  FOR SELECT TO authenticated
+  USING (public.is_org_member(auth.uid(), firm_id));
+
+-- Only allow inserts via triggers (not direct user inserts)
+CREATE POLICY "System can insert audit history" ON public.audit_history
+  FOR INSERT TO authenticated
+  WITH CHECK (true);
+
+-- ============================================================================
+-- TABLE: INDEPENDENCE DECLARATIONS
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS public.independence_declarations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  firm_id UUID NOT NULL REFERENCES public.firms(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  engagement_id UUID REFERENCES public.engagements(id) ON DELETE CASCADE,
+  declaration_type TEXT NOT NULL CHECK (declaration_type IN (
+    'annual_firm_wide', 'engagement_specific', 'new_hire', 'periodic_update'
+  )),
+  period_start DATE NOT NULL,
+  period_end DATE NOT NULL,
+  is_independent BOOLEAN NOT NULL,
+  conflicts_disclosed JSONB DEFAULT '[]',
+  financial_interests JSONB DEFAULT '{}',
+  business_relationships JSONB DEFAULT '{}',
+  family_relationships JSONB DEFAULT '{}',
+  attestation_statement TEXT NOT NULL,
+  attestation_date DATE NOT NULL,
+  requires_approval BOOLEAN DEFAULT false,
+  approved_by UUID REFERENCES auth.users(id),
+  approved_at TIMESTAMPTZ,
+  approval_notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_independence_firm ON public.independence_declarations(firm_id);
+CREATE INDEX idx_independence_user ON public.independence_declarations(user_id);
+CREATE INDEX idx_independence_engagement ON public.independence_declarations(engagement_id);
+ALTER TABLE public.independence_declarations ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can manage independence declarations" ON public.independence_declarations
+  FOR ALL TO authenticated
+  USING (public.is_org_member(auth.uid(), firm_id));
+
+-- ============================================================================
+-- FUNCTION: Log Audit History
+-- ============================================================================
+CREATE OR REPLACE FUNCTION public.log_audit_history()
+RETURNS TRIGGER AS $$
+DECLARE
+  v_old_values JSONB;
+  v_new_values JSONB;
+  v_changed_fields JSONB;
+  v_firm_id UUID;
+  v_engagement_id UUID;
+BEGIN
+  -- Get firm_id from the record
+  IF TG_OP = 'DELETE' THEN
+    v_firm_id := OLD.firm_id;
+    v_engagement_id := CASE WHEN OLD ? 'engagement_id' THEN OLD.engagement_id ELSE NULL END;
+    v_old_values := to_jsonb(OLD);
+    v_new_values := NULL;
+    v_changed_fields := NULL;
+  ELSIF TG_OP = 'INSERT' THEN
+    v_firm_id := NEW.firm_id;
+    v_engagement_id := CASE WHEN NEW ? 'engagement_id' THEN NEW.engagement_id ELSE NULL END;
+    v_old_values := NULL;
+    v_new_values := to_jsonb(NEW);
+    v_changed_fields := NULL;
+  ELSE -- UPDATE
+    v_firm_id := NEW.firm_id;
+    v_engagement_id := CASE WHEN NEW ? 'engagement_id' THEN NEW.engagement_id ELSE NULL END;
+    v_old_values := to_jsonb(OLD);
+    v_new_values := to_jsonb(NEW);
+    -- Calculate changed fields
+    SELECT jsonb_object_agg(key, value)
+    INTO v_changed_fields
+    FROM jsonb_each(to_jsonb(NEW))
+    WHERE to_jsonb(OLD) -> key IS DISTINCT FROM value
+      AND key NOT IN ('updated_at', 'created_at');
+  END IF;
+
+  -- Insert audit record
+  INSERT INTO public.audit_history (
+    firm_id,
+    engagement_id,
+    table_name,
+    record_id,
+    action,
+    old_values,
+    new_values,
+    changed_fields,
+    changed_by,
+    changed_at
+  ) VALUES (
+    v_firm_id,
+    v_engagement_id,
+    TG_TABLE_NAME,
+    COALESCE(NEW.id, OLD.id),
+    TG_OP,
+    v_old_values,
+    v_new_values,
+    v_changed_fields,
+    auth.uid(),
+    NOW()
+  );
+
+  IF TG_OP = 'DELETE' THEN
+    RETURN OLD;
+  ELSE
+    RETURN NEW;
+  END IF;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- ============================================================================
+-- TRIGGERS: Enable Audit Logging on Key Tables
+-- ============================================================================
+
+-- Engagements
+DROP TRIGGER IF EXISTS tr_audit_engagements ON public.engagements;
+CREATE TRIGGER tr_audit_engagements
+  AFTER INSERT OR UPDATE OR DELETE ON public.engagements
+  FOR EACH ROW EXECUTE FUNCTION public.log_audit_history();
+
+-- Risk Assessments
+DROP TRIGGER IF EXISTS tr_audit_risk_assessments ON public.risk_assessments;
+CREATE TRIGGER tr_audit_risk_assessments
+  AFTER INSERT OR UPDATE OR DELETE ON public.risk_assessments
+  FOR EACH ROW EXECUTE FUNCTION public.log_audit_history();
+
+-- Materiality Calculations
+DROP TRIGGER IF EXISTS tr_audit_materiality ON public.materiality_calculations;
+CREATE TRIGGER tr_audit_materiality
+  AFTER INSERT OR UPDATE OR DELETE ON public.materiality_calculations
+  FOR EACH ROW EXECUTE FUNCTION public.log_audit_history();
+
+-- Audit Adjustments
+DROP TRIGGER IF EXISTS tr_audit_adjustments ON public.audit_adjustments;
+CREATE TRIGGER tr_audit_adjustments
+  AFTER INSERT OR UPDATE OR DELETE ON public.audit_adjustments
+  FOR EACH ROW EXECUTE FUNCTION public.log_audit_history();
+
+-- Audit Reports
+DROP TRIGGER IF EXISTS tr_audit_reports ON public.audit_reports;
+CREATE TRIGGER tr_audit_reports
+  AFTER INSERT OR UPDATE OR DELETE ON public.audit_reports
+  FOR EACH ROW EXECUTE FUNCTION public.log_audit_history();
+
+-- Related Parties
+DROP TRIGGER IF EXISTS tr_audit_related_parties ON public.related_parties;
+CREATE TRIGGER tr_audit_related_parties
+  AFTER INSERT OR UPDATE OR DELETE ON public.related_parties
+  FOR EACH ROW EXECUTE FUNCTION public.log_audit_history();
+
+-- Management Representation Letters
+DROP TRIGGER IF EXISTS tr_audit_rep_letters ON public.management_representation_letters;
+CREATE TRIGGER tr_audit_rep_letters
+  AFTER INSERT OR UPDATE OR DELETE ON public.management_representation_letters
+  FOR EACH ROW EXECUTE FUNCTION public.log_audit_history();
+
+-- Signoffs
+DROP TRIGGER IF EXISTS tr_audit_signoffs ON public.signoffs;
+CREATE TRIGGER tr_audit_signoffs
+  AFTER INSERT OR UPDATE OR DELETE ON public.signoffs
+  FOR EACH ROW EXECUTE FUNCTION public.log_audit_history();
+
+-- Trial Balances
+DROP TRIGGER IF EXISTS tr_audit_trial_balances ON public.trial_balances;
+CREATE TRIGGER tr_audit_trial_balances
+  AFTER INSERT OR UPDATE OR DELETE ON public.trial_balances
+  FOR EACH ROW EXECUTE FUNCTION public.log_audit_history();
+
+-- ============================================================================
+-- Enable Realtime for Key Tables
+-- ============================================================================
+ALTER PUBLICATION supabase_realtime ADD TABLE public.review_notes;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.audit_procedures;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.signoffs;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.audit_adjustments;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.tcwg_communications;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.subsequent_events;
+
+-- ============================================================================
+-- VIEWS: Useful Aggregations
+-- ============================================================================
+
+-- Summary of Uncorrected Misstatements by Engagement
+CREATE OR REPLACE VIEW public.sum_by_engagement AS
+SELECT
+  engagement_id,
+  firm_id,
+  COUNT(*) FILTER (WHERE adjustment_type = 'sum') as total_items,
+  SUM(amount) FILTER (WHERE adjustment_type = 'sum') as total_amount,
+  SUM(amount) FILTER (WHERE adjustment_type = 'aje' AND posted = true) as posted_adjustments,
+  SUM(amount) FILTER (WHERE adjustment_type = 'pje') as passed_adjustments
+FROM public.audit_adjustments
+GROUP BY engagement_id, firm_id;
+
+-- Overdue PBC Items (placeholder - would need client_pbc_items table)
+-- CREATE OR REPLACE VIEW public.overdue_pbc_items AS ...
+
+COMMENT ON TABLE public.audit_history IS 'Comprehensive audit trail for regulatory compliance and peer review';
+COMMENT ON TABLE public.related_parties IS 'Related party identification per AU-C 550';
+COMMENT ON TABLE public.management_representation_letters IS 'Management representation letters per AU-C 580';
+COMMENT ON TABLE public.tcwg_communications IS 'Communications with Those Charged With Governance per AU-C 260';
+COMMENT ON TABLE public.control_deficiency_communications IS 'Control deficiency communications per AU-C 265';

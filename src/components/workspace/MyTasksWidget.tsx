@@ -36,9 +36,7 @@ export function MyTasksWidget() {
           priority,
           due_date,
           status,
-          engagement_id,
-          assigned_by,
-          assignedBy:profiles!assigned_by(full_name)
+          project_id
         `
         )
         .or(`assigned_to.eq.${user?.id},created_by.eq.${user?.id}`)
@@ -209,11 +207,11 @@ export function MyTasksWidget() {
                             {getDueLabel(task.due_date)}
                           </span>
                         </div>
-                        {task.assignedBy && (
+                        {task.project_id && (
                           <>
                             <span>•</span>
                             <div className="flex items-center gap-1">
-                              <span>Assigned by: {task.assignedBy.full_name}</span>
+                              <span>Project task</span>
                             </div>
                           </>
                         )}

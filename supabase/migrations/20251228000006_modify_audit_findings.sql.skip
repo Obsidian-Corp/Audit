@@ -1,0 +1,181 @@
+-- =====================================================================
+-- MIGRATION: Modify audit_findings table
+-- Ticket: DB-006
+-- Purpose: Add source linking columns for tracing findings back to
+--          procedures and workpapers, plus repeat finding tracking
+-- =====================================================================
+
+-- Add source_procedure_id to link findings to originating procedures
+ALTER TABLE public.audit_findings
+  ADD COLUMN IF NOT EXISTS source_procedure_id UUID REFERENCES public.audit_procedures(id) ON DELETE SET NULL;
+
+-- Add source_workpaper_id to link findings to supporting workpapers
+ALTER TABLE public.audit_findings
+  ADD COLUMN IF NOT EXISTS source_workpaper_id UUID REFERENCES public.audit_workpapers(id) ON DELETE SET NULL;
+
+-- Add human-readable finding reference (e.g., "F-2024-001")
+ALTER TABLE public.audit_findings
+  ADD COLUMN IF NOT EXISTS finding_reference VARCHAR(50);
+
+-- Add repeat finding tracking
+ALTER TABLE public.audit_findings
+  ADD COLUMN IF NOT EXISTS is_repeat_finding BOOLEAN DEFAULT FALSE;
+
+ALTER TABLE public.audit_findings
+  ADD COLUMN IF NOT EXISTS prior_year_finding_id UUID REFERENCES public.audit_findings(id) ON DELETE SET NULL;
+
+-- Add management response tracking
+ALTER TABLE public.audit_findings
+  ADD COLUMN IF NOT EXISTS management_response TEXT;
+
+ALTER TABLE public.audit_findings
+  ADD COLUMN IF NOT EXISTS management_response_date TIMESTAMPTZ;
+
+ALTER TABLE public.audit_findings
+  ADD COLUMN IF NOT EXISTS management_response_by UUID REFERENCES auth.users(id) ON DELETE SET NULL;
+
+-- Add follow-up fields
+ALTER TABLE public.audit_findings
+  ADD COLUMN IF NOT EXISTS remediation_deadline DATE;
+
+ALTER TABLE public.audit_findings
+  ADD COLUMN IF NOT EXISTS remediation_status VARCHAR(50) DEFAULT 'pending'
+    CHECK (remediation_status IN ('pending', 'in_progress', 'implemented', 'verified', 'not_remediated'));
+
+-- Create indexes for new columns
+CREATE INDEX IF NOT EXISTS idx_findings_source_procedure
+  ON public.audit_findings(source_procedure_id)
+  WHERE source_procedure_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_findings_source_workpaper
+  ON public.audit_findings(source_workpaper_id)
+  WHERE source_workpaper_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_findings_reference
+  ON public.audit_findings(finding_reference);
+
+CREATE INDEX IF NOT EXISTS idx_findings_repeat
+  ON public.audit_findings(is_repeat_finding)
+  WHERE is_repeat_finding = TRUE;
+
+CREATE INDEX IF NOT EXISTS idx_findings_remediation
+  ON public.audit_findings(remediation_status, remediation_deadline)
+  WHERE remediation_status NOT IN ('verified', 'not_remediated');
+
+-- Create sequence for finding reference numbers (per engagement per year)
+CREATE SEQUENCE IF NOT EXISTS finding_reference_seq START 1;
+
+-- Function to auto-generate finding_reference
+CREATE OR REPLACE FUNCTION generate_finding_reference()
+RETURNS TRIGGER AS $$
+DECLARE
+  v_year TEXT;
+  v_seq INT;
+  v_engagement_count INT;
+BEGIN
+  -- Only generate if finding_reference is not already set
+  IF NEW.finding_reference IS NOT NULL THEN
+    RETURN NEW;
+  END IF;
+
+  -- Get current year
+  v_year := EXTRACT(YEAR FROM COALESCE(NEW.created_at, NOW()))::TEXT;
+
+  -- Count existing findings for this engagement this year
+  SELECT COUNT(*) + 1 INTO v_seq
+  FROM public.audit_findings
+  WHERE engagement_id = NEW.engagement_id
+    AND finding_reference LIKE 'F-' || v_year || '-%';
+
+  -- Generate reference: F-YYYY-NNN
+  NEW.finding_reference := 'F-' || v_year || '-' || LPAD(v_seq::TEXT, 3, '0');
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Drop trigger if exists and recreate
+DROP TRIGGER IF EXISTS trigger_generate_finding_reference ON public.audit_findings;
+
+CREATE TRIGGER trigger_generate_finding_reference
+  BEFORE INSERT ON public.audit_findings
+  FOR EACH ROW
+  EXECUTE FUNCTION generate_finding_reference();
+
+-- Function to check for repeat findings from prior year
+CREATE OR REPLACE FUNCTION check_repeat_finding()
+RETURNS TRIGGER AS $$
+DECLARE
+  v_prior_finding_id UUID;
+  v_prior_year_start DATE;
+  v_prior_year_end DATE;
+BEGIN
+  -- Only check if not already marked as repeat
+  IF NEW.is_repeat_finding = TRUE AND NEW.prior_year_finding_id IS NOT NULL THEN
+    RETURN NEW;
+  END IF;
+
+  -- Calculate prior year date range
+  v_prior_year_start := DATE_TRUNC('year', COALESCE(NEW.created_at, NOW()) - INTERVAL '1 year');
+  v_prior_year_end := v_prior_year_start + INTERVAL '1 year' - INTERVAL '1 day';
+
+  -- Look for similar findings in the same client's engagements from prior year
+  SELECT f.id INTO v_prior_finding_id
+  FROM public.audit_findings f
+  JOIN public.audits a ON a.id = f.engagement_id
+  JOIN public.audits current_a ON current_a.id = NEW.engagement_id
+  WHERE a.client_id = current_a.client_id
+    AND a.id != NEW.engagement_id
+    AND f.created_at BETWEEN v_prior_year_start AND v_prior_year_end
+    AND (
+      -- Match by title similarity (simplified - in production use trigram similarity)
+      LOWER(f.title) = LOWER(NEW.title)
+      OR f.finding_reference = NEW.prior_year_finding_id::TEXT
+    )
+  ORDER BY f.created_at DESC
+  LIMIT 1;
+
+  IF v_prior_finding_id IS NOT NULL THEN
+    NEW.is_repeat_finding := TRUE;
+    NEW.prior_year_finding_id := v_prior_finding_id;
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Drop trigger if exists and recreate
+DROP TRIGGER IF EXISTS trigger_check_repeat_finding ON public.audit_findings;
+
+CREATE TRIGGER trigger_check_repeat_finding
+  BEFORE INSERT ON public.audit_findings
+  FOR EACH ROW
+  EXECUTE FUNCTION check_repeat_finding();
+
+-- Generate finding_reference for existing findings that don't have one
+UPDATE public.audit_findings
+SET finding_reference = 'F-' || EXTRACT(YEAR FROM COALESCE(created_at, NOW()))::TEXT || '-' ||
+  LPAD(ROW_NUMBER() OVER (
+    PARTITION BY engagement_id, EXTRACT(YEAR FROM COALESCE(created_at, NOW()))
+    ORDER BY created_at
+  )::TEXT, 3, '0')
+WHERE finding_reference IS NULL;
+
+-- Add comments for documentation
+COMMENT ON COLUMN public.audit_findings.source_procedure_id IS 'Procedure that identified this finding';
+COMMENT ON COLUMN public.audit_findings.source_workpaper_id IS 'Workpaper containing evidence for this finding';
+COMMENT ON COLUMN public.audit_findings.finding_reference IS 'Human-readable reference (e.g., F-2024-001)';
+COMMENT ON COLUMN public.audit_findings.is_repeat_finding IS 'Whether this finding appeared in prior year engagement';
+COMMENT ON COLUMN public.audit_findings.prior_year_finding_id IS 'Reference to prior year finding if this is a repeat';
+COMMENT ON COLUMN public.audit_findings.management_response IS 'Client management response to the finding';
+COMMENT ON COLUMN public.audit_findings.remediation_status IS 'Status of client remediation efforts';
+
+-- Success message
+DO $$
+BEGIN
+  RAISE NOTICE '✅ DB-006: audit_findings table modified successfully';
+  RAISE NOTICE '   - Added source linking columns (procedure, workpaper)';
+  RAISE NOTICE '   - Added finding_reference with auto-generation';
+  RAISE NOTICE '   - Added repeat finding tracking';
+  RAISE NOTICE '   - Added management response and remediation fields';
+END $$;

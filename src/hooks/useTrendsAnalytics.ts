@@ -34,14 +34,15 @@ export function useTrendsAnalytics(engagementId?: string) {
   const { data: auditCycleData, isLoading: cycleLoading } = useQuery({
     queryKey: ['audit-cycle-trends', engagementId],
     queryFn: async () => {
+      // NOTE: Using 'audits' table instead of 'engagements' which doesn't exist
       let query = supabase
-        .from('engagements')
+        .from('audits')
         .select(`
           id,
-          name,
-          start_date,
-          target_completion_date,
-          actual_completion_date,
+          audit_title,
+          planned_start_date,
+          planned_end_date,
+          actual_end_date,
           status,
           created_at
         `);
@@ -63,22 +64,22 @@ export function useTrendsAnalytics(engagementId?: string) {
         monthlyData.set(monthKey, { planned: [], actual: [], count: 0 });
       }
 
-      (data || []).forEach((engagement: any) => {
-        if (!engagement.start_date || !engagement.target_completion_date) return;
+      (data || []).forEach((audit: any) => {
+        if (!audit.planned_start_date || !audit.planned_end_date) return;
 
-        const completedDate = new Date(engagement.actual_completion_date || engagement.target_completion_date);
+        const completedDate = new Date(audit.actual_end_date || audit.planned_end_date);
         const monthKey = completedDate.toLocaleDateString('en-US', { month: 'short' });
 
         if (monthlyData.has(monthKey)) {
           const monthData = monthlyData.get(monthKey)!;
 
           const plannedDays = Math.ceil(
-            (new Date(engagement.target_completion_date).getTime() - new Date(engagement.start_date).getTime()) / (1000 * 60 * 60 * 24)
+            (new Date(audit.planned_end_date).getTime() - new Date(audit.planned_start_date).getTime()) / (1000 * 60 * 60 * 24)
           );
 
-          const actualDays = engagement.actual_completion_date
+          const actualDays = audit.actual_end_date
             ? Math.ceil(
-                (new Date(engagement.actual_completion_date).getTime() - new Date(engagement.start_date).getTime()) / (1000 * 60 * 60 * 24)
+                (new Date(audit.actual_end_date).getTime() - new Date(audit.planned_start_date).getTime()) / (1000 * 60 * 60 * 24)
               )
             : plannedDays;
 
@@ -144,9 +145,10 @@ export function useTrendsAnalytics(engagementId?: string) {
   const { data: budgetTrends, isLoading: budgetLoading } = useQuery({
     queryKey: ['budget-trends', engagementId],
     queryFn: async () => {
+      // NOTE: Using 'audits' table instead of 'engagements' which doesn't exist
       let query = supabase
-        .from('engagements')
-        .select('id, budget_hours, actual_hours, created_at, target_completion_date');
+        .from('audits')
+        .select('id, budget_hours, hours_spent, created_at, planned_end_date');
 
       if (engagementId) {
         query = query.eq('id', engagementId);
@@ -165,16 +167,16 @@ export function useTrendsAnalytics(engagementId?: string) {
         monthlyData.set(monthKey, { planned: [], actual: [] });
       }
 
-      (data || []).forEach((engagement: any) => {
-        if (!engagement.target_completion_date) return;
+      (data || []).forEach((audit: any) => {
+        if (!audit.planned_end_date) return;
 
-        const date = new Date(engagement.target_completion_date);
+        const date = new Date(audit.planned_end_date);
         const monthKey = date.toLocaleDateString('en-US', { month: 'short' });
 
         if (monthlyData.has(monthKey)) {
           const monthData = monthlyData.get(monthKey)!;
-          monthData.planned.push(engagement.budget_hours * 150 || 125000); // Assuming $150/hour
-          monthData.actual.push((engagement.actual_hours || engagement.budget_hours) * 150 || 120000);
+          monthData.planned.push(audit.budget_hours * 150 || 125000); // Assuming $150/hour
+          monthData.actual.push((audit.hours_spent || audit.budget_hours) * 150 || 120000);
         }
       });
 
@@ -189,8 +191,9 @@ export function useTrendsAnalytics(engagementId?: string) {
   const { data: statusDistribution, isLoading: statusLoading } = useQuery({
     queryKey: ['status-distribution', engagementId],
     queryFn: async () => {
+      // NOTE: Using 'audits' table instead of 'engagements' which doesn't exist
       let query = supabase
-        .from('engagements')
+        .from('audits')
         .select('id, status, created_at');
 
       if (engagementId) {
@@ -210,13 +213,13 @@ export function useTrendsAnalytics(engagementId?: string) {
         monthlyData.set(monthKey, { planning: 0, inProgress: 0, review: 0, completed: 0 });
       }
 
-      (data || []).forEach((engagement: any) => {
-        const date = new Date(engagement.created_at);
+      (data || []).forEach((audit: any) => {
+        const date = new Date(audit.created_at);
         const monthKey = date.toLocaleDateString('en-US', { month: 'short' });
 
         if (monthlyData.has(monthKey)) {
           const monthData = monthlyData.get(monthKey)!;
-          const status = engagement.status.toLowerCase();
+          const status = audit.status.toLowerCase();
 
           if (status === 'planning') monthData.planning++;
           else if (status === 'in_progress' || status === 'in-progress') monthData.inProgress++;

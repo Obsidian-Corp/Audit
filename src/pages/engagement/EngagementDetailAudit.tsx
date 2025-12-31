@@ -47,17 +47,15 @@ export default function EngagementDetailAudit() {
           *,
           client:clients(
             id,
-            name,
-            contact_email,
-            contact_phone
+            client_name
           ),
-          partner:profiles!lead_auditor_id(
+          partner:profiles!audits_lead_auditor_id_fkey(
             id,
             full_name,
             email,
             avatar_url
           ),
-          manager:profiles!manager_id(
+          manager:profiles!audits_manager_id_fkey(
             id,
             full_name,
             email,

@@ -41,10 +41,10 @@ export function AuditOverviewTab({ engagementId, engagement }: AuditOverviewTabP
   };
 
   const getBudgetStatus = () => {
-    if (!engagement?.budgeted_hours) return 'Unknown';
+    if (!engagement?.budget_hours) return 'Unknown';
     // This would come from actual time entries in production
     const hoursUsed = 87; // Mock data
-    const percentage = (hoursUsed / engagement.budgeted_hours) * 100;
+    const percentage = (hoursUsed / engagement.budget_hours) * 100;
 
     if (percentage > 110) return 'Over Budget';
     if (percentage > 90) return 'At Risk';
@@ -89,7 +89,7 @@ export function AuditOverviewTab({ engagementId, engagement }: AuditOverviewTabP
           <div className="flex items-center justify-between">
             <span className="text-sm">Hours Logged</span>
             <span className="text-sm font-medium">
-              87 / {engagement?.budgeted_hours || 0}
+              87 / {engagement?.budget_hours || 0}
             </span>
           </div>
 

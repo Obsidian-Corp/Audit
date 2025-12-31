@@ -5,6 +5,11 @@
  * Review and closeout tools including findings, adjustments,
  * review notes, independence, and subsequent events per System
  * Design Document Section 7.3.4
+ *
+ * Updated to include professional standards components:
+ * - Related Parties (AU-C 550)
+ * - Management Representations (AU-C 580)
+ * - TCWG Communications (AU-C 260/265)
  * ==================================================================
  */
 
@@ -34,6 +39,8 @@ import {
   TrendingDown,
   TrendingUp,
   AlertTriangle,
+  Users,
+  MessageSquare,
 } from 'lucide-react';
 import {
   useAuditAdjustments,
@@ -42,6 +49,11 @@ import {
   useSubsequentEvents,
 } from '@/hooks/useAuditTools';
 import { useAuth } from '@/contexts/AuthContext';
+
+// Import professional standards components
+import { RelatedPartiesManager } from '@/components/audit-tools/RelatedPartiesManager';
+import { ManagementRepresentations } from '@/components/audit-tools/ManagementRepresentations';
+import { TCWGCommunications } from '@/components/audit-tools/TCWGCommunications';
 
 interface AuditReviewTabProps {
   engagementId: string;
@@ -52,12 +64,15 @@ export function AuditReviewTab({ engagementId, engagement }: AuditReviewTabProps
   return (
     <div className="p-6">
       <Tabs defaultValue="findings" className="w-full">
-        <TabsList className="grid w-full grid-cols-5 mb-6">
+        <TabsList className="grid w-full grid-cols-8 mb-6">
           <TabsTrigger value="findings">Findings</TabsTrigger>
           <TabsTrigger value="adjustments">Adjustments</TabsTrigger>
           <TabsTrigger value="notes">Review Notes</TabsTrigger>
           <TabsTrigger value="independence">Independence</TabsTrigger>
           <TabsTrigger value="events">Subsequent Events</TabsTrigger>
+          <TabsTrigger value="related-parties">Related Parties</TabsTrigger>
+          <TabsTrigger value="representations">Rep Letter</TabsTrigger>
+          <TabsTrigger value="tcwg">TCWG</TabsTrigger>
         </TabsList>
 
         <TabsContent value="findings">
@@ -78,6 +93,22 @@ export function AuditReviewTab({ engagementId, engagement }: AuditReviewTabProps
 
         <TabsContent value="events">
           <SubsequentEventsCard engagementId={engagementId} />
+        </TabsContent>
+
+        <TabsContent value="related-parties">
+          <RelatedPartiesManager engagementId={engagementId} />
+        </TabsContent>
+
+        <TabsContent value="representations">
+          <ManagementRepresentations
+            engagementId={engagementId}
+            clientName={engagement?.client?.name}
+            periodEndDate={engagement?.period_end_date}
+          />
+        </TabsContent>
+
+        <TabsContent value="tcwg">
+          <TCWGCommunications engagementId={engagementId} />
         </TabsContent>
       </Tabs>
     </div>

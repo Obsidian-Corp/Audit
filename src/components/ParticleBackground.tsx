@@ -142,12 +142,12 @@ const ParticleBackground = () => {
     <>
       <canvas
         ref={canvasRef}
-        className="fixed inset-0 pointer-events-none"
+        className="absolute inset-0 pointer-events-none"
         style={{ opacity: 0.4 }}
       />
       {/* Edge vignette effect */}
       <div
-        className="fixed inset-0 pointer-events-none"
+        className="absolute inset-0 pointer-events-none"
         style={{
           background: 'radial-gradient(ellipse at center, transparent 0%, transparent 40%, rgba(0,0,0,0.4) 70%, rgba(0,0,0,0.8) 100%)',
           boxShadow: 'inset 0 0 200px rgba(0,0,0,0.9)'

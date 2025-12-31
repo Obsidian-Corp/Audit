@@ -6,7 +6,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { FileText, Calendar, Clock, ArrowRight } from 'lucide-react';
-import { Breadcrumbs } from '@/components/ui/breadcrumbs';
 import { Badge } from '@/components/ui/badge';
 
 export default function WorkpapersLanding() {
@@ -19,7 +18,7 @@ export default function WorkpapersLanding() {
       const { data, error } = await supabase
         .from('audits')
         .select('*')
-        .order('start_date', { ascending: false });
+        .order('planned_start_date', { ascending: false });
 
       if (error) {
         console.error('[WorkpapersLanding] Error:', error);
@@ -74,13 +73,6 @@ export default function WorkpapersLanding() {
   return (
     <div className="min-h-screen bg-background">
       <div className="container mx-auto p-6 md:p-8 space-y-6">
-        <Breadcrumbs
-          items={[
-            { label: 'Dashboard', href: '/dashboard' },
-            { label: 'Workpapers' },
-          ]}
-        />
-
         <div className="space-y-2">
           <h1 className="text-3xl font-bold text-foreground tracking-tight">
             Audit Workpapers
@@ -104,8 +96,8 @@ export default function WorkpapersLanding() {
               <p className="text-sm text-muted-foreground mb-6 max-w-md">
                 Create an audit first to start documenting procedures and findings in workpapers
               </p>
-              <Button onClick={() => navigate('/audit-overview')}>
-                Go to Audit Overview
+              <Button onClick={() => navigate('/engagements')}>
+                Go to Engagements
               </Button>
             </CardContent>
           </Card>
@@ -133,7 +125,7 @@ export default function WorkpapersLanding() {
                     <div className="flex items-center gap-2 text-muted-foreground">
                       <Calendar className="w-4 h-4" />
                       <span>
-                        {new Date(audit.actual_start_date).toLocaleDateString()} - {new Date(audit.actual_end_date).toLocaleDateString()}
+                        {audit.planned_start_date ? new Date(audit.planned_start_date).toLocaleDateString() : 'TBD'} - {audit.planned_end_date ? new Date(audit.planned_end_date).toLocaleDateString() : 'TBD'}
                       </span>
                     </div>
                     <div className="flex items-center gap-2 text-muted-foreground">

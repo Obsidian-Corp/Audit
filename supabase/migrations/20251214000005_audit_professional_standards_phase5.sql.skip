@@ -1,0 +1,1333 @@
+-- =====================================================
+-- PHASE 5: AUDIT REPORTING & COMMUNICATIONS
+-- Professional Standards: AU-C 700-706, ISA 700-706
+-- =====================================================
+-- This migration implements comprehensive audit reporting
+-- including opinion determination, KAMs, report versioning,
+-- management representations, and TCWG communications.
+-- =====================================================
+
+-- =====================================================
+-- SECTION 1: AUDIT OPINIONS (AU-C 700, 705)
+-- =====================================================
+
+-- Audit opinion types per professional standards
+CREATE TYPE audit_opinion_type AS ENUM (
+    'unmodified',           -- AU-C 700 - Clean opinion
+    'qualified',            -- AU-C 705 - Except for
+    'adverse',              -- AU-C 705 - Pervasive misstatement
+    'disclaimer'            -- AU-C 705 - Scope limitation
+);
+
+-- Modification reason types
+CREATE TYPE opinion_modification_reason AS ENUM (
+    'material_misstatement_not_pervasive',      -- Qualified
+    'material_misstatement_pervasive',          -- Adverse
+    'scope_limitation_not_pervasive',           -- Qualified
+    'scope_limitation_pervasive',               -- Disclaimer
+    'multiple_uncertainties',                   -- Disclaimer
+    'inability_to_obtain_evidence'              -- Qualified or Disclaimer
+);
+
+-- Key Audit Matters categories (AU-C 701, ISA 701)
+CREATE TYPE kam_category AS ENUM (
+    'significant_risk',
+    'significant_judgment',
+    'significant_transaction',
+    'complex_accounting_estimate',
+    'related_party_transaction',
+    'going_concern',
+    'revenue_recognition',
+    'impairment_assessment',
+    'complex_financial_instrument',
+    'acquisition_or_disposal',
+    'other_significant_matter'
+);
+
+-- Emphasis of Matter types (AU-C 706)
+CREATE TYPE emphasis_matter_type AS ENUM (
+    'going_concern_uncertainty',
+    'significant_subsequent_event',
+    'early_application_standard',
+    'major_catastrophe',
+    'significant_related_party',
+    'unusual_legal_proceeding',
+    'other_matter'
+);
+
+-- Other Matter types (AU-C 706)
+CREATE TYPE other_matter_type AS ENUM (
+    'restriction_on_distribution',
+    'prior_period_financial_statements',
+    'supplementary_information',
+    'other_auditor_involved',
+    'component_auditor_reliance',
+    'required_supplementary_information',
+    'other'
+);
+
+-- Audit opinions table
+CREATE TABLE audit_opinions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    firm_id UUID NOT NULL REFERENCES firms(id) ON DELETE CASCADE,
+    engagement_id UUID NOT NULL REFERENCES engagements(id) ON DELETE CASCADE,
+
+    -- Opinion details
+    opinion_type audit_opinion_type NOT NULL,
+    opinion_date DATE,
+    report_date DATE,
+
+    -- Modification details (if not unmodified)
+    modification_reason opinion_modification_reason,
+    modification_description TEXT,
+    material_misstatement_description TEXT,
+    scope_limitation_description TEXT,
+
+    -- Basis for opinion
+    basis_for_opinion TEXT NOT NULL,
+
+    -- Auditor responsibility section
+    auditor_responsibilities TEXT NOT NULL,
+
+    -- Management responsibility section
+    management_responsibilities TEXT NOT NULL,
+
+    -- TCWG responsibility (if different from management)
+    tcwg_responsibilities TEXT,
+
+    -- Financial statement framework
+    applicable_framework TEXT NOT NULL DEFAULT 'US GAAP',
+    fair_presentation_framework BOOLEAN DEFAULT true,
+    compliance_framework BOOLEAN DEFAULT false,
+
+    -- Report signatures
+    engagement_partner_id UUID REFERENCES profiles(id),
+    signing_partner_id UUID REFERENCES profiles(id),
+    firm_signature_name TEXT,
+    firm_location TEXT,
+
+    -- Status workflow
+    status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'review', 'partner_review', 'approved', 'issued', 'superseded')),
+
+    -- Approval tracking
+    reviewed_by UUID REFERENCES profiles(id),
+    reviewed_at TIMESTAMPTZ,
+    approved_by UUID REFERENCES profiles(id),
+    approved_at TIMESTAMPTZ,
+    issued_at TIMESTAMPTZ,
+
+    -- Version control
+    version_number INTEGER NOT NULL DEFAULT 1,
+    prior_version_id UUID REFERENCES audit_opinions(id),
+    superseded_by UUID REFERENCES audit_opinions(id),
+    superseded_at TIMESTAMPTZ,
+    superseded_reason TEXT,
+
+    -- Report hash for integrity
+    report_content_hash TEXT,
+
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by UUID REFERENCES profiles(id),
+    updated_by UUID REFERENCES profiles(id),
+
+    CONSTRAINT unique_engagement_version UNIQUE (engagement_id, version_number)
+);
+
+-- Key Audit Matters (KAMs) per AU-C 701, ISA 701
+CREATE TABLE key_audit_matters (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    firm_id UUID NOT NULL REFERENCES firms(id) ON DELETE CASCADE,
+    audit_opinion_id UUID NOT NULL REFERENCES audit_opinions(id) ON DELETE CASCADE,
+    engagement_id UUID NOT NULL REFERENCES engagements(id) ON DELETE CASCADE,
+
+    -- KAM identification
+    matter_title TEXT NOT NULL,
+    category kam_category NOT NULL,
+
+    -- Description per standards
+    why_matter_is_kam TEXT NOT NULL,           -- Why it was determined to be a KAM
+    how_matter_addressed TEXT NOT NULL,         -- How the matter was addressed in the audit
+
+    -- Reference to financial statement
+    financial_statement_reference TEXT,
+    related_disclosures TEXT,
+
+    -- Linkage to audit documentation
+    related_risk_id UUID,                       -- Link to risk assessment
+    related_finding_id UUID,                    -- Link to audit findings
+    related_workpaper_ids UUID[],               -- Links to supporting workpapers
+
+    -- Ordering in report
+    display_order INTEGER NOT NULL DEFAULT 1,
+
+    -- Status
+    included_in_report BOOLEAN NOT NULL DEFAULT true,
+    exclusion_reason TEXT,
+
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by UUID REFERENCES profiles(id)
+);
+
+-- Emphasis of Matter paragraphs (AU-C 706)
+CREATE TABLE emphasis_of_matters (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    firm_id UUID NOT NULL REFERENCES firms(id) ON DELETE CASCADE,
+    audit_opinion_id UUID NOT NULL REFERENCES audit_opinions(id) ON DELETE CASCADE,
+
+    -- EOM details
+    matter_type emphasis_matter_type NOT NULL,
+    matter_title TEXT NOT NULL,
+    paragraph_text TEXT NOT NULL,
+
+    -- Financial statement reference (required by standards)
+    financial_statement_reference TEXT NOT NULL,
+    disclosure_reference TEXT,
+
+    -- Positioning
+    display_order INTEGER NOT NULL DEFAULT 1,
+    position_in_report TEXT DEFAULT 'after_basis' CHECK (position_in_report IN ('after_basis', 'after_kam', 'after_other_matter')),
+
+    -- Documentation
+    rationale_for_inclusion TEXT NOT NULL,
+    related_workpaper_ids UUID[],
+
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by UUID REFERENCES profiles(id)
+);
+
+-- Other Matter paragraphs (AU-C 706)
+CREATE TABLE other_matter_paragraphs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    firm_id UUID NOT NULL REFERENCES firms(id) ON DELETE CASCADE,
+    audit_opinion_id UUID NOT NULL REFERENCES audit_opinions(id) ON DELETE CASCADE,
+
+    -- OM details
+    matter_type other_matter_type NOT NULL,
+    matter_title TEXT NOT NULL,
+    paragraph_text TEXT NOT NULL,
+
+    -- Positioning
+    display_order INTEGER NOT NULL DEFAULT 1,
+
+    -- Documentation
+    rationale_for_inclusion TEXT NOT NULL,
+
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by UUID REFERENCES profiles(id)
+);
+
+-- =====================================================
+-- SECTION 2: MANAGEMENT REPRESENTATIONS (AU-C 580)
+-- =====================================================
+
+-- Representation letter categories
+CREATE TYPE representation_category AS ENUM (
+    'general',
+    'fair_presentation',
+    'completeness',
+    'recognition_measurement',
+    'disclosure',
+    'subsequent_events',
+    'fraud',
+    'laws_regulations',
+    'litigation_claims',
+    'related_parties',
+    'estimates',
+    'going_concern',
+    'internal_control',
+    'specific_assertions'
+);
+
+-- Management representation letters
+CREATE TABLE management_representations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    firm_id UUID NOT NULL REFERENCES firms(id) ON DELETE CASCADE,
+    engagement_id UUID NOT NULL REFERENCES engagements(id) ON DELETE CASCADE,
+
+    -- Letter details
+    letter_date DATE NOT NULL,
+    period_covered_start DATE NOT NULL,
+    period_covered_end DATE NOT NULL,
+
+    -- Addressee
+    addressed_to TEXT NOT NULL,
+
+    -- Signatories
+    ceo_name TEXT,
+    ceo_title TEXT,
+    ceo_signed BOOLEAN DEFAULT false,
+    ceo_signed_at TIMESTAMPTZ,
+
+    cfo_name TEXT,
+    cfo_title TEXT,
+    cfo_signed BOOLEAN DEFAULT false,
+    cfo_signed_at TIMESTAMPTZ,
+
+    other_signatories JSONB DEFAULT '[]',
+
+    -- Letter status
+    status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'sent', 'pending_signature', 'signed', 'received')),
+
+    -- Tracking
+    sent_date DATE,
+    received_date DATE,
+
+    -- Storage reference
+    document_storage_path TEXT,
+    document_hash TEXT,
+
+    -- Notes
+    notes TEXT,
+
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by UUID REFERENCES profiles(id)
+);
+
+-- Individual representations in the letter
+CREATE TABLE representation_items (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    representation_letter_id UUID NOT NULL REFERENCES management_representations(id) ON DELETE CASCADE,
+    firm_id UUID NOT NULL REFERENCES firms(id) ON DELETE CASCADE,
+
+    -- Representation details
+    category representation_category NOT NULL,
+    representation_text TEXT NOT NULL,
+
+    -- Standard vs custom
+    is_standard_representation BOOLEAN DEFAULT true,
+    standard_reference TEXT,                    -- e.g., "AU-C 580.A34"
+
+    -- Ordering
+    display_order INTEGER NOT NULL DEFAULT 1,
+
+    -- Inclusion tracking
+    included BOOLEAN DEFAULT true,
+    exclusion_reason TEXT,
+
+    -- Management response
+    management_confirmed BOOLEAN,
+    management_comments TEXT,
+
+    -- Auditor documentation
+    auditor_evaluation TEXT,
+    contradictory_evidence_noted BOOLEAN DEFAULT false,
+    contradictory_evidence_description TEXT,
+
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- =====================================================
+-- SECTION 3: TCWG COMMUNICATIONS (AU-C 260, 265)
+-- =====================================================
+
+-- Communication types per AU-C 260
+CREATE TYPE tcwg_communication_type AS ENUM (
+    'planning',                     -- AU-C 260.12-14
+    'audit_scope_timing',           -- AU-C 260.15
+    'significant_findings',         -- AU-C 260.16
+    'auditor_independence',         -- AU-C 260.17
+    'internal_control_matters',     -- AU-C 265
+    'fraud_related',                -- AU-C 240
+    'going_concern',                -- AU-C 570
+    'noncompliance_laws',           -- AU-C 250
+    'engagement_letter_matters',
+    'disagreements_with_management',
+    'significant_difficulties',
+    'other_matters',
+    'final_communication'
+);
+
+-- TCWG Communications log
+CREATE TABLE tcwg_communications (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    firm_id UUID NOT NULL REFERENCES firms(id) ON DELETE CASCADE,
+    engagement_id UUID NOT NULL REFERENCES engagements(id) ON DELETE CASCADE,
+
+    -- Communication details
+    communication_type tcwg_communication_type NOT NULL,
+    communication_date DATE NOT NULL,
+
+    -- Method
+    communication_method TEXT NOT NULL CHECK (communication_method IN ('written', 'oral', 'written_and_oral')),
+
+    -- Content
+    subject TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    detailed_content TEXT,
+
+    -- Recipients
+    recipients JSONB NOT NULL DEFAULT '[]',     -- Array of {name, title, email}
+
+    -- For written communications
+    document_storage_path TEXT,
+    document_hash TEXT,
+
+    -- For oral communications
+    meeting_date TIMESTAMPTZ,
+    meeting_attendees JSONB,
+    meeting_minutes_path TEXT,
+
+    -- TCWG response
+    response_received BOOLEAN DEFAULT false,
+    response_date DATE,
+    response_summary TEXT,
+    response_document_path TEXT,
+
+    -- Follow-up required
+    follow_up_required BOOLEAN DEFAULT false,
+    follow_up_description TEXT,
+    follow_up_due_date DATE,
+    follow_up_completed BOOLEAN DEFAULT false,
+    follow_up_completed_date DATE,
+
+    -- Linkage
+    related_finding_ids UUID[],
+    related_control_deficiency_ids UUID[],
+    related_fraud_matter_ids UUID[],
+
+    -- Status
+    status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'pending_review', 'approved', 'sent', 'acknowledged')),
+
+    -- Approval
+    approved_by UUID REFERENCES profiles(id),
+    approved_at TIMESTAMPTZ,
+    sent_by UUID REFERENCES profiles(id),
+    sent_at TIMESTAMPTZ,
+
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by UUID REFERENCES profiles(id)
+);
+
+-- Internal control deficiency communications (AU-C 265)
+CREATE TABLE control_deficiency_communications (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    firm_id UUID NOT NULL REFERENCES firms(id) ON DELETE CASCADE,
+    engagement_id UUID NOT NULL REFERENCES engagements(id) ON DELETE CASCADE,
+    tcwg_communication_id UUID REFERENCES tcwg_communications(id),
+
+    -- Letter details
+    letter_type TEXT NOT NULL CHECK (letter_type IN ('material_weakness', 'significant_deficiency', 'other_deficiency')),
+    letter_date DATE NOT NULL,
+
+    -- Recipients
+    addressed_to_tcwg BOOLEAN DEFAULT true,
+    addressed_to_management BOOLEAN DEFAULT true,
+    recipient_names JSONB NOT NULL DEFAULT '[]',
+
+    -- Content
+    introduction TEXT NOT NULL,
+    deficiencies_section TEXT NOT NULL,
+    conclusion TEXT NOT NULL,
+
+    -- Related deficiencies
+    related_control_deficiency_ids UUID[] NOT NULL,
+
+    -- Status
+    status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'review', 'approved', 'sent', 'acknowledged')),
+
+    -- Tracking
+    sent_date DATE,
+    acknowledged_date DATE,
+    acknowledged_by TEXT,
+
+    -- Storage
+    document_storage_path TEXT,
+    document_hash TEXT,
+
+    -- Management response
+    management_response_received BOOLEAN DEFAULT false,
+    management_response_date DATE,
+    management_response_summary TEXT,
+    management_response_document_path TEXT,
+
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by UUID REFERENCES profiles(id)
+);
+
+-- =====================================================
+-- SECTION 4: REPORT GENERATION & ASSEMBLY
+-- =====================================================
+
+-- Report templates
+CREATE TABLE audit_report_templates (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    firm_id UUID REFERENCES firms(id) ON DELETE CASCADE,  -- NULL for system templates
+
+    -- Template identification
+    template_name TEXT NOT NULL,
+    template_code TEXT NOT NULL,
+    description TEXT,
+
+    -- Applicability
+    opinion_type audit_opinion_type,            -- NULL = all types
+    engagement_type TEXT,                       -- 'financial_statement', 'compliance', 'integrated', etc.
+    applicable_framework TEXT,                  -- 'US GAAP', 'IFRS', etc.
+
+    -- Template content
+    template_content JSONB NOT NULL,            -- Structured template with placeholders
+
+    -- Status
+    is_active BOOLEAN DEFAULT true,
+    is_system_template BOOLEAN DEFAULT false,
+
+    -- Version
+    version_number INTEGER DEFAULT 1,
+    effective_date DATE,
+    superseded_date DATE,
+
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by UUID REFERENCES profiles(id)
+);
+
+-- Generated audit reports
+CREATE TABLE audit_reports (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    firm_id UUID NOT NULL REFERENCES firms(id) ON DELETE CASCADE,
+    engagement_id UUID NOT NULL REFERENCES engagements(id) ON DELETE CASCADE,
+    audit_opinion_id UUID NOT NULL REFERENCES audit_opinions(id),
+    template_id UUID REFERENCES audit_report_templates(id),
+
+    -- Report details
+    report_title TEXT NOT NULL,
+    report_date DATE NOT NULL,
+
+    -- Assembled content
+    report_content TEXT NOT NULL,               -- Final assembled report text
+    report_content_html TEXT,                   -- HTML version
+    report_content_pdf_path TEXT,               -- Path to generated PDF
+
+    -- Integrity
+    content_hash TEXT NOT NULL,
+
+    -- Workflow status
+    status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN (
+        'draft',
+        'manager_review',
+        'partner_review',
+        'eqcr_review',
+        'final_review',
+        'approved',
+        'issued',
+        'superseded'
+    )),
+
+    -- Review tracking
+    manager_reviewed_by UUID REFERENCES profiles(id),
+    manager_reviewed_at TIMESTAMPTZ,
+    manager_comments TEXT,
+
+    partner_reviewed_by UUID REFERENCES profiles(id),
+    partner_reviewed_at TIMESTAMPTZ,
+    partner_comments TEXT,
+
+    eqcr_reviewed_by UUID REFERENCES profiles(id),
+    eqcr_reviewed_at TIMESTAMPTZ,
+    eqcr_comments TEXT,
+
+    -- Final approval
+    approved_by UUID REFERENCES profiles(id),
+    approved_at TIMESTAMPTZ,
+
+    -- Issuance
+    issued_at TIMESTAMPTZ,
+    issued_to JSONB,                            -- Recipients of the issued report
+
+    -- Supersession
+    superseded_by UUID REFERENCES audit_reports(id),
+    superseded_at TIMESTAMPTZ,
+    superseded_reason TEXT,
+
+    -- Version
+    version_number INTEGER NOT NULL DEFAULT 1,
+    prior_version_id UUID REFERENCES audit_reports(id),
+
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by UUID REFERENCES profiles(id)
+);
+
+-- Report change history for audit trail
+CREATE TABLE audit_report_history (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    report_id UUID NOT NULL REFERENCES audit_reports(id) ON DELETE CASCADE,
+
+    -- Change details
+    changed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    changed_by UUID REFERENCES profiles(id),
+    change_type TEXT NOT NULL CHECK (change_type IN ('created', 'edited', 'status_change', 'reviewed', 'approved', 'issued', 'superseded')),
+
+    -- State at time of change
+    previous_status TEXT,
+    new_status TEXT,
+    previous_content_hash TEXT,
+    new_content_hash TEXT,
+
+    -- Description
+    change_description TEXT,
+
+    -- Full content snapshot (optional, for major changes)
+    content_snapshot TEXT
+);
+
+-- =====================================================
+-- SECTION 5: REPORT CHECKLISTS & QUALITY CONTROL
+-- =====================================================
+
+-- Report issuance checklist
+CREATE TABLE report_issuance_checklists (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    firm_id UUID NOT NULL REFERENCES firms(id) ON DELETE CASCADE,
+    audit_report_id UUID NOT NULL REFERENCES audit_reports(id) ON DELETE CASCADE,
+    engagement_id UUID NOT NULL REFERENCES engagements(id) ON DELETE CASCADE,
+
+    -- Checklist status
+    status TEXT NOT NULL DEFAULT 'in_progress' CHECK (status IN ('in_progress', 'complete', 'blocked')),
+
+    -- Pre-issuance requirements (all must be complete)
+
+    -- Documentation completion
+    all_workpapers_complete BOOLEAN DEFAULT false,
+    all_workpapers_reviewed BOOLEAN DEFAULT false,
+    all_review_notes_cleared BOOLEAN DEFAULT false,
+
+    -- Findings resolution
+    all_findings_resolved BOOLEAN DEFAULT false,
+    uncorrected_misstatements_evaluated BOOLEAN DEFAULT false,
+    sod_immaterial_confirmed BOOLEAN DEFAULT false,  -- Summary of differences
+
+    -- Required communications
+    tcwg_communications_complete BOOLEAN DEFAULT false,
+    management_rep_letter_received BOOLEAN DEFAULT false,
+    attorney_letters_received BOOLEAN DEFAULT false,
+
+    -- Partner/EQCR
+    partner_review_complete BOOLEAN DEFAULT false,
+    eqcr_complete BOOLEAN DEFAULT false,
+    eqcr_issues_resolved BOOLEAN DEFAULT false,
+
+    -- Independence
+    independence_confirmed BOOLEAN DEFAULT false,
+    independence_documentation_complete BOOLEAN DEFAULT false,
+
+    -- Going concern
+    going_concern_evaluation_complete BOOLEAN DEFAULT false,
+
+    -- Subsequent events
+    subsequent_events_review_complete BOOLEAN DEFAULT false,
+    subsequent_events_review_date DATE,
+
+    -- Report review
+    report_format_reviewed BOOLEAN DEFAULT false,
+    report_dates_verified BOOLEAN DEFAULT false,
+    financial_statement_tie_out BOOLEAN DEFAULT false,
+    disclosure_checklist_complete BOOLEAN DEFAULT false,
+
+    -- Final sign-offs
+    engagement_partner_signoff BOOLEAN DEFAULT false,
+    engagement_partner_signoff_at TIMESTAMPTZ,
+    concurring_partner_signoff BOOLEAN DEFAULT false,
+    concurring_partner_signoff_at TIMESTAMPTZ,
+
+    -- Completion
+    completed_by UUID REFERENCES profiles(id),
+    completed_at TIMESTAMPTZ,
+
+    -- Notes
+    notes TEXT,
+    blocking_issues TEXT,
+
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- =====================================================
+-- SECTION 6: INDEXES FOR PERFORMANCE
+-- =====================================================
+
+-- Audit opinions indexes
+CREATE INDEX idx_audit_opinions_engagement ON audit_opinions(engagement_id);
+CREATE INDEX idx_audit_opinions_firm ON audit_opinions(firm_id);
+CREATE INDEX idx_audit_opinions_status ON audit_opinions(status);
+CREATE INDEX idx_audit_opinions_type ON audit_opinions(opinion_type);
+CREATE INDEX idx_audit_opinions_date ON audit_opinions(opinion_date);
+
+-- KAMs indexes
+CREATE INDEX idx_kam_opinion ON key_audit_matters(audit_opinion_id);
+CREATE INDEX idx_kam_engagement ON key_audit_matters(engagement_id);
+CREATE INDEX idx_kam_category ON key_audit_matters(category);
+
+-- EOM indexes
+CREATE INDEX idx_eom_opinion ON emphasis_of_matters(audit_opinion_id);
+
+-- OM indexes
+CREATE INDEX idx_om_opinion ON other_matter_paragraphs(audit_opinion_id);
+
+-- Management representations indexes
+CREATE INDEX idx_mgmt_rep_engagement ON management_representations(engagement_id);
+CREATE INDEX idx_mgmt_rep_status ON management_representations(status);
+
+-- Representation items indexes
+CREATE INDEX idx_rep_items_letter ON representation_items(representation_letter_id);
+CREATE INDEX idx_rep_items_category ON representation_items(category);
+
+-- TCWG communications indexes
+CREATE INDEX idx_tcwg_comm_engagement ON tcwg_communications(engagement_id);
+CREATE INDEX idx_tcwg_comm_type ON tcwg_communications(communication_type);
+CREATE INDEX idx_tcwg_comm_status ON tcwg_communications(status);
+CREATE INDEX idx_tcwg_comm_date ON tcwg_communications(communication_date);
+
+-- Control deficiency communications indexes
+CREATE INDEX idx_ctrl_def_comm_engagement ON control_deficiency_communications(engagement_id);
+CREATE INDEX idx_ctrl_def_comm_type ON control_deficiency_communications(letter_type);
+
+-- Report templates indexes
+CREATE INDEX idx_report_templates_firm ON audit_report_templates(firm_id);
+CREATE INDEX idx_report_templates_type ON audit_report_templates(opinion_type);
+CREATE INDEX idx_report_templates_active ON audit_report_templates(is_active);
+
+-- Audit reports indexes
+CREATE INDEX idx_audit_reports_engagement ON audit_reports(engagement_id);
+CREATE INDEX idx_audit_reports_opinion ON audit_reports(audit_opinion_id);
+CREATE INDEX idx_audit_reports_status ON audit_reports(status);
+CREATE INDEX idx_audit_reports_date ON audit_reports(report_date);
+
+-- Report history indexes
+CREATE INDEX idx_report_history_report ON audit_report_history(report_id);
+CREATE INDEX idx_report_history_date ON audit_report_history(changed_at);
+
+-- Report issuance checklist indexes
+CREATE INDEX idx_issuance_checklist_report ON report_issuance_checklists(audit_report_id);
+CREATE INDEX idx_issuance_checklist_engagement ON report_issuance_checklists(engagement_id);
+CREATE INDEX idx_issuance_checklist_status ON report_issuance_checklists(status);
+
+-- =====================================================
+-- SECTION 7: ROW LEVEL SECURITY
+-- =====================================================
+
+ALTER TABLE audit_opinions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE key_audit_matters ENABLE ROW LEVEL SECURITY;
+ALTER TABLE emphasis_of_matters ENABLE ROW LEVEL SECURITY;
+ALTER TABLE other_matter_paragraphs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE management_representations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE representation_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tcwg_communications ENABLE ROW LEVEL SECURITY;
+ALTER TABLE control_deficiency_communications ENABLE ROW LEVEL SECURITY;
+ALTER TABLE audit_report_templates ENABLE ROW LEVEL SECURITY;
+ALTER TABLE audit_reports ENABLE ROW LEVEL SECURITY;
+ALTER TABLE audit_report_history ENABLE ROW LEVEL SECURITY;
+ALTER TABLE report_issuance_checklists ENABLE ROW LEVEL SECURITY;
+
+-- Audit opinions policies
+CREATE POLICY "audit_opinions_select" ON audit_opinions FOR SELECT
+    USING (firm_id IN (SELECT firm_id FROM profiles WHERE id = auth.uid()));
+
+CREATE POLICY "audit_opinions_insert" ON audit_opinions FOR INSERT
+    WITH CHECK (firm_id IN (SELECT firm_id FROM profiles WHERE id = auth.uid()));
+
+CREATE POLICY "audit_opinions_update" ON audit_opinions FOR UPDATE
+    USING (firm_id IN (SELECT firm_id FROM profiles WHERE id = auth.uid()));
+
+CREATE POLICY "audit_opinions_delete" ON audit_opinions FOR DELETE
+    USING (firm_id IN (SELECT firm_id FROM profiles WHERE id = auth.uid()));
+
+-- KAMs policies
+CREATE POLICY "kam_select" ON key_audit_matters FOR SELECT
+    USING (firm_id IN (SELECT firm_id FROM profiles WHERE id = auth.uid()));
+
+CREATE POLICY "kam_insert" ON key_audit_matters FOR INSERT
+    WITH CHECK (firm_id IN (SELECT firm_id FROM profiles WHERE id = auth.uid()));
+
+CREATE POLICY "kam_update" ON key_audit_matters FOR UPDATE
+    USING (firm_id IN (SELECT firm_id FROM profiles WHERE id = auth.uid()));
+
+CREATE POLICY "kam_delete" ON key_audit_matters FOR DELETE
+    USING (firm_id IN (SELECT firm_id FROM profiles WHERE id = auth.uid()));
+
+-- EOM policies
+CREATE POLICY "eom_select" ON emphasis_of_matters FOR SELECT
+    USING (firm_id IN (SELECT firm_id FROM profiles WHERE id = auth.uid()));
+
+CREATE POLICY "eom_insert" ON emphasis_of_matters FOR INSERT
+    WITH CHECK (firm_id IN (SELECT firm_id FROM profiles WHERE id = auth.uid()));
+
+CREATE POLICY "eom_update" ON emphasis_of_matters FOR UPDATE
+    USING (firm_id IN (SELECT firm_id FROM profiles WHERE id = auth.uid()));
+
+CREATE POLICY "eom_delete" ON emphasis_of_matters FOR DELETE
+    USING (firm_id IN (SELECT firm_id FROM profiles WHERE id = auth.uid()));
+
+-- OM policies
+CREATE POLICY "om_select" ON other_matter_paragraphs FOR SELECT
+    USING (firm_id IN (SELECT firm_id FROM profiles WHERE id = auth.uid()));
+
+CREATE POLICY "om_insert" ON other_matter_paragraphs FOR INSERT
+    WITH CHECK (firm_id IN (SELECT firm_id FROM profiles WHERE id = auth.uid()));
+
+CREATE POLICY "om_update" ON other_matter_paragraphs FOR UPDATE
+    USING (firm_id IN (SELECT firm_id FROM profiles WHERE id = auth.uid()));
+
+CREATE POLICY "om_delete" ON other_matter_paragraphs FOR DELETE
+    USING (firm_id IN (SELECT firm_id FROM profiles WHERE id = auth.uid()));
+
+-- Management representations policies
+CREATE POLICY "mgmt_rep_select" ON management_representations FOR SELECT
+    USING (firm_id IN (SELECT firm_id FROM profiles WHERE id = auth.uid()));
+
+CREATE POLICY "mgmt_rep_insert" ON management_representations FOR INSERT
+    WITH CHECK (firm_id IN (SELECT firm_id FROM profiles WHERE id = auth.uid()));
+
+CREATE POLICY "mgmt_rep_update" ON management_representations FOR UPDATE
+    USING (firm_id IN (SELECT firm_id FROM profiles WHERE id = auth.uid()));
+
+CREATE POLICY "mgmt_rep_delete" ON management_representations FOR DELETE
+    USING (firm_id IN (SELECT firm_id FROM profiles WHERE id = auth.uid()));
+
+-- Representation items policies
+CREATE POLICY "rep_items_select" ON representation_items FOR SELECT
+    USING (firm_id IN (SELECT firm_id FROM profiles WHERE id = auth.uid()));
+
+CREATE POLICY "rep_items_insert" ON representation_items FOR INSERT
+    WITH CHECK (firm_id IN (SELECT firm_id FROM profiles WHERE id = auth.uid()));
+
+CREATE POLICY "rep_items_update" ON representation_items FOR UPDATE
+    USING (firm_id IN (SELECT firm_id FROM profiles WHERE id = auth.uid()));
+
+CREATE POLICY "rep_items_delete" ON representation_items FOR DELETE
+    USING (firm_id IN (SELECT firm_id FROM profiles WHERE id = auth.uid()));
+
+-- TCWG communications policies
+CREATE POLICY "tcwg_comm_select" ON tcwg_communications FOR SELECT
+    USING (firm_id IN (SELECT firm_id FROM profiles WHERE id = auth.uid()));
+
+CREATE POLICY "tcwg_comm_insert" ON tcwg_communications FOR INSERT
+    WITH CHECK (firm_id IN (SELECT firm_id FROM profiles WHERE id = auth.uid()));
+
+CREATE POLICY "tcwg_comm_update" ON tcwg_communications FOR UPDATE
+    USING (firm_id IN (SELECT firm_id FROM profiles WHERE id = auth.uid()));
+
+CREATE POLICY "tcwg_comm_delete" ON tcwg_communications FOR DELETE
+    USING (firm_id IN (SELECT firm_id FROM profiles WHERE id = auth.uid()));
+
+-- Control deficiency communications policies
+CREATE POLICY "ctrl_def_comm_select" ON control_deficiency_communications FOR SELECT
+    USING (firm_id IN (SELECT firm_id FROM profiles WHERE id = auth.uid()));
+
+CREATE POLICY "ctrl_def_comm_insert" ON control_deficiency_communications FOR INSERT
+    WITH CHECK (firm_id IN (SELECT firm_id FROM profiles WHERE id = auth.uid()));
+
+CREATE POLICY "ctrl_def_comm_update" ON control_deficiency_communications FOR UPDATE
+    USING (firm_id IN (SELECT firm_id FROM profiles WHERE id = auth.uid()));
+
+CREATE POLICY "ctrl_def_comm_delete" ON control_deficiency_communications FOR DELETE
+    USING (firm_id IN (SELECT firm_id FROM profiles WHERE id = auth.uid()));
+
+-- Report templates policies (including system templates)
+CREATE POLICY "report_templates_select" ON audit_report_templates FOR SELECT
+    USING (
+        firm_id IS NULL  -- System templates visible to all
+        OR firm_id IN (SELECT firm_id FROM profiles WHERE id = auth.uid())
+    );
+
+CREATE POLICY "report_templates_insert" ON audit_report_templates FOR INSERT
+    WITH CHECK (firm_id IN (SELECT firm_id FROM profiles WHERE id = auth.uid()));
+
+CREATE POLICY "report_templates_update" ON audit_report_templates FOR UPDATE
+    USING (firm_id IN (SELECT firm_id FROM profiles WHERE id = auth.uid()));
+
+CREATE POLICY "report_templates_delete" ON audit_report_templates FOR DELETE
+    USING (firm_id IN (SELECT firm_id FROM profiles WHERE id = auth.uid()));
+
+-- Audit reports policies
+CREATE POLICY "audit_reports_select" ON audit_reports FOR SELECT
+    USING (firm_id IN (SELECT firm_id FROM profiles WHERE id = auth.uid()));
+
+CREATE POLICY "audit_reports_insert" ON audit_reports FOR INSERT
+    WITH CHECK (firm_id IN (SELECT firm_id FROM profiles WHERE id = auth.uid()));
+
+CREATE POLICY "audit_reports_update" ON audit_reports FOR UPDATE
+    USING (firm_id IN (SELECT firm_id FROM profiles WHERE id = auth.uid()));
+
+CREATE POLICY "audit_reports_delete" ON audit_reports FOR DELETE
+    USING (firm_id IN (SELECT firm_id FROM profiles WHERE id = auth.uid()));
+
+-- Report history policies
+CREATE POLICY "report_history_select" ON audit_report_history FOR SELECT
+    USING (report_id IN (
+        SELECT id FROM audit_reports
+        WHERE firm_id IN (SELECT firm_id FROM profiles WHERE id = auth.uid())
+    ));
+
+CREATE POLICY "report_history_insert" ON audit_report_history FOR INSERT
+    WITH CHECK (report_id IN (
+        SELECT id FROM audit_reports
+        WHERE firm_id IN (SELECT firm_id FROM profiles WHERE id = auth.uid())
+    ));
+
+-- Report issuance checklist policies
+CREATE POLICY "issuance_checklist_select" ON report_issuance_checklists FOR SELECT
+    USING (firm_id IN (SELECT firm_id FROM profiles WHERE id = auth.uid()));
+
+CREATE POLICY "issuance_checklist_insert" ON report_issuance_checklists FOR INSERT
+    WITH CHECK (firm_id IN (SELECT firm_id FROM profiles WHERE id = auth.uid()));
+
+CREATE POLICY "issuance_checklist_update" ON report_issuance_checklists FOR UPDATE
+    USING (firm_id IN (SELECT firm_id FROM profiles WHERE id = auth.uid()));
+
+CREATE POLICY "issuance_checklist_delete" ON report_issuance_checklists FOR DELETE
+    USING (firm_id IN (SELECT firm_id FROM profiles WHERE id = auth.uid()));
+
+-- =====================================================
+-- SECTION 8: HELPER FUNCTIONS
+-- =====================================================
+
+-- Function to determine opinion type based on findings
+CREATE OR REPLACE FUNCTION determine_opinion_type(p_engagement_id UUID)
+RETURNS audit_opinion_type AS $$
+DECLARE
+    v_has_material_misstatement BOOLEAN;
+    v_has_pervasive_misstatement BOOLEAN;
+    v_has_scope_limitation BOOLEAN;
+    v_has_pervasive_scope_limitation BOOLEAN;
+    v_has_multiple_uncertainties BOOLEAN;
+BEGIN
+    -- Check for material misstatements
+    SELECT EXISTS (
+        SELECT 1 FROM audit_findings af
+        WHERE af.engagement_id = p_engagement_id
+        AND af.is_material = true
+        AND af.status NOT IN ('resolved', 'adjusted')
+    ) INTO v_has_material_misstatement;
+
+    -- Check if misstatements are pervasive
+    SELECT EXISTS (
+        SELECT 1 FROM audit_findings af
+        WHERE af.engagement_id = p_engagement_id
+        AND af.is_material = true
+        AND af.is_pervasive = true
+        AND af.status NOT IN ('resolved', 'adjusted')
+    ) INTO v_has_pervasive_misstatement;
+
+    -- Check for scope limitations (from subsequent_events or other tracking)
+    v_has_scope_limitation := false;  -- Would need to query scope limitation tracking
+    v_has_pervasive_scope_limitation := false;
+    v_has_multiple_uncertainties := false;
+
+    -- Determine opinion type per AU-C 705
+    IF v_has_multiple_uncertainties THEN
+        RETURN 'disclaimer';
+    ELSIF v_has_pervasive_scope_limitation THEN
+        RETURN 'disclaimer';
+    ELSIF v_has_pervasive_misstatement THEN
+        RETURN 'adverse';
+    ELSIF v_has_material_misstatement OR v_has_scope_limitation THEN
+        RETURN 'qualified';
+    ELSE
+        RETURN 'unmodified';
+    END IF;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Function to check if report can be issued
+CREATE OR REPLACE FUNCTION check_report_issuance_ready(p_report_id UUID)
+RETURNS TABLE (
+    is_ready BOOLEAN,
+    blocking_items TEXT[]
+) AS $$
+DECLARE
+    v_checklist RECORD;
+    v_blocking TEXT[] := ARRAY[]::TEXT[];
+BEGIN
+    -- Get the checklist
+    SELECT * INTO v_checklist
+    FROM report_issuance_checklists
+    WHERE audit_report_id = p_report_id;
+
+    IF NOT FOUND THEN
+        RETURN QUERY SELECT false, ARRAY['Issuance checklist not found'];
+        RETURN;
+    END IF;
+
+    -- Check each required item
+    IF NOT v_checklist.all_workpapers_complete THEN
+        v_blocking := array_append(v_blocking, 'Workpapers incomplete');
+    END IF;
+
+    IF NOT v_checklist.all_workpapers_reviewed THEN
+        v_blocking := array_append(v_blocking, 'Workpaper reviews incomplete');
+    END IF;
+
+    IF NOT v_checklist.all_review_notes_cleared THEN
+        v_blocking := array_append(v_blocking, 'Review notes not cleared');
+    END IF;
+
+    IF NOT v_checklist.all_findings_resolved THEN
+        v_blocking := array_append(v_blocking, 'Findings not resolved');
+    END IF;
+
+    IF NOT v_checklist.management_rep_letter_received THEN
+        v_blocking := array_append(v_blocking, 'Management representation letter not received');
+    END IF;
+
+    IF NOT v_checklist.partner_review_complete THEN
+        v_blocking := array_append(v_blocking, 'Partner review not complete');
+    END IF;
+
+    IF NOT v_checklist.independence_confirmed THEN
+        v_blocking := array_append(v_blocking, 'Independence not confirmed');
+    END IF;
+
+    IF NOT v_checklist.subsequent_events_review_complete THEN
+        v_blocking := array_append(v_blocking, 'Subsequent events review not complete');
+    END IF;
+
+    IF NOT v_checklist.engagement_partner_signoff THEN
+        v_blocking := array_append(v_blocking, 'Engagement partner sign-off missing');
+    END IF;
+
+    RETURN QUERY SELECT (array_length(v_blocking, 1) IS NULL OR array_length(v_blocking, 1) = 0), v_blocking;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Function to create report history entry
+CREATE OR REPLACE FUNCTION log_report_change()
+RETURNS TRIGGER AS $$
+BEGIN
+    INSERT INTO audit_report_history (
+        report_id,
+        changed_by,
+        change_type,
+        previous_status,
+        new_status,
+        previous_content_hash,
+        new_content_hash,
+        change_description
+    ) VALUES (
+        NEW.id,
+        NEW.updated_by,
+        CASE
+            WHEN TG_OP = 'INSERT' THEN 'created'
+            WHEN OLD.status != NEW.status AND NEW.status = 'issued' THEN 'issued'
+            WHEN OLD.status != NEW.status AND NEW.status = 'approved' THEN 'approved'
+            WHEN OLD.status != NEW.status THEN 'status_change'
+            WHEN OLD.content_hash != NEW.content_hash THEN 'edited'
+            ELSE 'edited'
+        END,
+        CASE WHEN TG_OP = 'UPDATE' THEN OLD.status ELSE NULL END,
+        NEW.status,
+        CASE WHEN TG_OP = 'UPDATE' THEN OLD.content_hash ELSE NULL END,
+        NEW.content_hash,
+        CASE
+            WHEN TG_OP = 'INSERT' THEN 'Report created'
+            WHEN OLD.status != NEW.status THEN 'Status changed from ' || OLD.status || ' to ' || NEW.status
+            ELSE 'Report content updated'
+        END
+    );
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Trigger for report history
+CREATE TRIGGER tr_audit_report_history
+    AFTER INSERT OR UPDATE ON audit_reports
+    FOR EACH ROW
+    EXECUTE FUNCTION log_report_change();
+
+-- Function to validate opinion before issuance
+CREATE OR REPLACE FUNCTION validate_opinion_for_issuance(p_opinion_id UUID)
+RETURNS TABLE (
+    is_valid BOOLEAN,
+    validation_errors TEXT[]
+) AS $$
+DECLARE
+    v_opinion RECORD;
+    v_errors TEXT[] := ARRAY[]::TEXT[];
+BEGIN
+    SELECT * INTO v_opinion FROM audit_opinions WHERE id = p_opinion_id;
+
+    IF NOT FOUND THEN
+        RETURN QUERY SELECT false, ARRAY['Opinion not found'];
+        RETURN;
+    END IF;
+
+    -- Check required fields
+    IF v_opinion.basis_for_opinion IS NULL OR v_opinion.basis_for_opinion = '' THEN
+        v_errors := array_append(v_errors, 'Basis for opinion is required');
+    END IF;
+
+    IF v_opinion.auditor_responsibilities IS NULL OR v_opinion.auditor_responsibilities = '' THEN
+        v_errors := array_append(v_errors, 'Auditor responsibilities section is required');
+    END IF;
+
+    IF v_opinion.management_responsibilities IS NULL OR v_opinion.management_responsibilities = '' THEN
+        v_errors := array_append(v_errors, 'Management responsibilities section is required');
+    END IF;
+
+    -- Check modification requirements
+    IF v_opinion.opinion_type != 'unmodified' THEN
+        IF v_opinion.modification_reason IS NULL THEN
+            v_errors := array_append(v_errors, 'Modification reason required for modified opinions');
+        END IF;
+        IF v_opinion.modification_description IS NULL OR v_opinion.modification_description = '' THEN
+            v_errors := array_append(v_errors, 'Modification description required for modified opinions');
+        END IF;
+    END IF;
+
+    -- Check signing partner
+    IF v_opinion.signing_partner_id IS NULL THEN
+        v_errors := array_append(v_errors, 'Signing partner is required');
+    END IF;
+
+    -- Check report date
+    IF v_opinion.report_date IS NULL THEN
+        v_errors := array_append(v_errors, 'Report date is required');
+    END IF;
+
+    RETURN QUERY SELECT (array_length(v_errors, 1) IS NULL OR array_length(v_errors, 1) = 0), v_errors;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- =====================================================
+-- SECTION 9: STANDARD REPORT TEMPLATES
+-- =====================================================
+
+-- Insert standard report templates
+INSERT INTO audit_report_templates (
+    template_name,
+    template_code,
+    description,
+    opinion_type,
+    engagement_type,
+    applicable_framework,
+    template_content,
+    is_active,
+    is_system_template,
+    version_number,
+    effective_date
+) VALUES
+(
+    'Unmodified Opinion - US GAAP',
+    'STD-UNMOD-USGAAP',
+    'Standard unmodified opinion report for US GAAP financial statements',
+    'unmodified',
+    'financial_statement',
+    'US GAAP',
+    '{
+        "sections": [
+            {"name": "title", "content": "INDEPENDENT AUDITOR''S REPORT"},
+            {"name": "addressee", "placeholder": "{{addressee}}"},
+            {"name": "opinion_header", "content": "Opinion"},
+            {"name": "opinion", "placeholder": "{{opinion_paragraph}}"},
+            {"name": "basis_header", "content": "Basis for Opinion"},
+            {"name": "basis", "placeholder": "{{basis_for_opinion}}"},
+            {"name": "responsibilities_management_header", "content": "Responsibilities of Management for the Financial Statements"},
+            {"name": "responsibilities_management", "placeholder": "{{management_responsibilities}}"},
+            {"name": "responsibilities_auditor_header", "content": "Auditor''s Responsibilities for the Audit of the Financial Statements"},
+            {"name": "responsibilities_auditor", "placeholder": "{{auditor_responsibilities}}"},
+            {"name": "signature", "placeholder": "{{firm_signature}}"},
+            {"name": "location", "placeholder": "{{firm_location}}"},
+            {"name": "date", "placeholder": "{{report_date}}"}
+        ]
+    }'::jsonb,
+    true,
+    true,
+    1,
+    '2024-01-01'
+),
+(
+    'Qualified Opinion - US GAAP',
+    'STD-QUAL-USGAAP',
+    'Standard qualified opinion report for US GAAP financial statements',
+    'qualified',
+    'financial_statement',
+    'US GAAP',
+    '{
+        "sections": [
+            {"name": "title", "content": "INDEPENDENT AUDITOR''S REPORT"},
+            {"name": "addressee", "placeholder": "{{addressee}}"},
+            {"name": "opinion_header", "content": "Qualified Opinion"},
+            {"name": "opinion", "placeholder": "{{opinion_paragraph}}"},
+            {"name": "basis_header", "content": "Basis for Qualified Opinion"},
+            {"name": "basis", "placeholder": "{{basis_for_opinion}}"},
+            {"name": "qualification_header", "content": "Matter Giving Rise to the Qualified Opinion"},
+            {"name": "qualification", "placeholder": "{{modification_description}}"},
+            {"name": "responsibilities_management_header", "content": "Responsibilities of Management for the Financial Statements"},
+            {"name": "responsibilities_management", "placeholder": "{{management_responsibilities}}"},
+            {"name": "responsibilities_auditor_header", "content": "Auditor''s Responsibilities for the Audit of the Financial Statements"},
+            {"name": "responsibilities_auditor", "placeholder": "{{auditor_responsibilities}}"},
+            {"name": "signature", "placeholder": "{{firm_signature}}"},
+            {"name": "location", "placeholder": "{{firm_location}}"},
+            {"name": "date", "placeholder": "{{report_date}}"}
+        ]
+    }'::jsonb,
+    true,
+    true,
+    1,
+    '2024-01-01'
+),
+(
+    'Adverse Opinion - US GAAP',
+    'STD-ADV-USGAAP',
+    'Standard adverse opinion report for US GAAP financial statements',
+    'adverse',
+    'financial_statement',
+    'US GAAP',
+    '{
+        "sections": [
+            {"name": "title", "content": "INDEPENDENT AUDITOR''S REPORT"},
+            {"name": "addressee", "placeholder": "{{addressee}}"},
+            {"name": "opinion_header", "content": "Adverse Opinion"},
+            {"name": "opinion", "placeholder": "{{opinion_paragraph}}"},
+            {"name": "basis_header", "content": "Basis for Adverse Opinion"},
+            {"name": "basis", "placeholder": "{{basis_for_opinion}}"},
+            {"name": "misstatement_header", "content": "Matter Giving Rise to the Adverse Opinion"},
+            {"name": "misstatement", "placeholder": "{{material_misstatement_description}}"},
+            {"name": "responsibilities_management_header", "content": "Responsibilities of Management for the Financial Statements"},
+            {"name": "responsibilities_management", "placeholder": "{{management_responsibilities}}"},
+            {"name": "responsibilities_auditor_header", "content": "Auditor''s Responsibilities for the Audit of the Financial Statements"},
+            {"name": "responsibilities_auditor", "placeholder": "{{auditor_responsibilities}}"},
+            {"name": "signature", "placeholder": "{{firm_signature}}"},
+            {"name": "location", "placeholder": "{{firm_location}}"},
+            {"name": "date", "placeholder": "{{report_date}}"}
+        ]
+    }'::jsonb,
+    true,
+    true,
+    1,
+    '2024-01-01'
+),
+(
+    'Disclaimer of Opinion - US GAAP',
+    'STD-DISC-USGAAP',
+    'Standard disclaimer of opinion report for US GAAP financial statements',
+    'disclaimer',
+    'financial_statement',
+    'US GAAP',
+    '{
+        "sections": [
+            {"name": "title", "content": "INDEPENDENT AUDITOR''S REPORT"},
+            {"name": "addressee", "placeholder": "{{addressee}}"},
+            {"name": "opinion_header", "content": "Disclaimer of Opinion"},
+            {"name": "disclaimer", "placeholder": "{{opinion_paragraph}}"},
+            {"name": "basis_header", "content": "Basis for Disclaimer of Opinion"},
+            {"name": "basis", "placeholder": "{{scope_limitation_description}}"},
+            {"name": "responsibilities_management_header", "content": "Responsibilities of Management for the Financial Statements"},
+            {"name": "responsibilities_management", "placeholder": "{{management_responsibilities}}"},
+            {"name": "responsibilities_auditor_header", "content": "Auditor''s Responsibilities for the Audit of the Financial Statements"},
+            {"name": "responsibilities_auditor", "content": "Our responsibility is to conduct an audit of the Company''s financial statements in accordance with auditing standards generally accepted in the United States of America and to issue an auditor''s report. However, because of the matter described in the Basis for Disclaimer of Opinion section of our report, we were not able to obtain sufficient appropriate audit evidence to provide a basis for an audit opinion on the financial statements."},
+            {"name": "independence", "content": "We are required to be independent of the Company and to meet our other ethical responsibilities, in accordance with the relevant ethical requirements relating to our audit."},
+            {"name": "signature", "placeholder": "{{firm_signature}}"},
+            {"name": "location", "placeholder": "{{firm_location}}"},
+            {"name": "date", "placeholder": "{{report_date}}"}
+        ]
+    }'::jsonb,
+    true,
+    true,
+    1,
+    '2024-01-01'
+);
+
+-- Insert standard representation items template
+INSERT INTO representation_items (
+    representation_letter_id,
+    firm_id,
+    category,
+    representation_text,
+    is_standard_representation,
+    standard_reference,
+    display_order
+)
+SELECT
+    '00000000-0000-0000-0000-000000000000'::uuid,  -- Placeholder, won't actually insert
+    '00000000-0000-0000-0000-000000000000'::uuid,
+    category::representation_category,
+    representation_text,
+    true,
+    standard_reference,
+    display_order
+FROM (VALUES
+    ('general', 'We have fulfilled our responsibilities, as set out in the terms of the audit engagement, for the preparation and fair presentation of the financial statements in accordance with [applicable framework].', 'AU-C 580.10', 1),
+    ('fair_presentation', 'The financial statements are fairly presented in conformity with [applicable framework].', 'AU-C 580.11', 2),
+    ('completeness', 'We have provided you with access to all information of which we are aware that is relevant to the preparation and fair presentation of the financial statements.', 'AU-C 580.11', 3),
+    ('completeness', 'All transactions have been recorded in the accounting records and are reflected in the financial statements.', 'AU-C 580.11', 4),
+    ('fraud', 'We acknowledge our responsibility for the design, implementation, and maintenance of internal control relevant to the preparation and fair presentation of financial statements that are free from material misstatement, whether due to fraud or error.', 'AU-C 580.11', 5),
+    ('fraud', 'We have disclosed to you the results of our assessment of the risk that the financial statements may be materially misstated as a result of fraud.', 'AU-C 580.11', 6),
+    ('fraud', 'We have disclosed to you all information in relation to fraud or suspected fraud that we are aware of.', 'AU-C 580.11', 7),
+    ('laws_regulations', 'We have disclosed to you all known instances of non-compliance or suspected non-compliance with laws and regulations whose effects should be considered when preparing financial statements.', 'AU-C 580.11', 8),
+    ('litigation_claims', 'We have disclosed to you all known actual or possible litigation and claims whose effects should be considered when preparing the financial statements.', 'AU-C 580.11', 9),
+    ('related_parties', 'We have disclosed to you the identity of the entity''s related parties and all the related party relationships and transactions of which we are aware.', 'AU-C 580.11', 10),
+    ('subsequent_events', 'All events occurring subsequent to the date of the financial statements and for which [applicable framework] requires adjustment or disclosure have been adjusted or disclosed.', 'AU-C 580.11', 11),
+    ('estimates', 'The methods, the data, and the significant assumptions used in making accounting estimates, and their related disclosures are appropriate to achieve recognition, measurement, or disclosure that is reasonable in the context of [applicable framework].', 'AU-C 580.11', 12),
+    ('going_concern', 'We have no knowledge of any matters that may cast significant doubt on the entity''s ability to continue as a going concern.', 'AU-C 580.11', 13)
+) AS t(category, representation_text, standard_reference, display_order)
+WHERE false;  -- This prevents actual insertion, just creates template reference
+
+-- =====================================================
+-- SECTION 10: UPDATED_AT TRIGGERS
+-- =====================================================
+
+CREATE TRIGGER set_timestamp_audit_opinions
+    BEFORE UPDATE ON audit_opinions
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER set_timestamp_key_audit_matters
+    BEFORE UPDATE ON key_audit_matters
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER set_timestamp_management_representations
+    BEFORE UPDATE ON management_representations
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER set_timestamp_tcwg_communications
+    BEFORE UPDATE ON tcwg_communications
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER set_timestamp_control_deficiency_communications
+    BEFORE UPDATE ON control_deficiency_communications
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER set_timestamp_audit_report_templates
+    BEFORE UPDATE ON audit_report_templates
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER set_timestamp_audit_reports
+    BEFORE UPDATE ON audit_reports
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER set_timestamp_report_issuance_checklists
+    BEFORE UPDATE ON report_issuance_checklists
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
+-- =====================================================
+-- SECTION 11: COMMENTS FOR DOCUMENTATION
+-- =====================================================
+
+COMMENT ON TABLE audit_opinions IS 'Stores audit opinions per AU-C 700, 705. Includes opinion type, modification details, and version control.';
+COMMENT ON TABLE key_audit_matters IS 'Key Audit Matters per AU-C 701. Documents significant matters communicated in the auditor''s report.';
+COMMENT ON TABLE emphasis_of_matters IS 'Emphasis of Matter paragraphs per AU-C 706. Draws attention to matters appropriately presented in financial statements.';
+COMMENT ON TABLE other_matter_paragraphs IS 'Other Matter paragraphs per AU-C 706. Communicates matters not presented in financial statements.';
+COMMENT ON TABLE management_representations IS 'Management representation letters per AU-C 580. Tracks required written representations from management.';
+COMMENT ON TABLE representation_items IS 'Individual representations within management representation letters.';
+COMMENT ON TABLE tcwg_communications IS 'Communications with Those Charged With Governance per AU-C 260. Logs all required communications.';
+COMMENT ON TABLE control_deficiency_communications IS 'Control deficiency communications per AU-C 265. Documents material weaknesses and significant deficiencies.';
+COMMENT ON TABLE audit_report_templates IS 'Templates for generating audit reports. Includes system templates and firm-specific customizations.';
+COMMENT ON TABLE audit_reports IS 'Generated audit reports with version control and approval workflow.';
+COMMENT ON TABLE audit_report_history IS 'Audit trail of all changes to audit reports.';
+COMMENT ON TABLE report_issuance_checklists IS 'Pre-issuance checklist ensuring all requirements are met before report release.';
+
+COMMENT ON FUNCTION determine_opinion_type IS 'Determines the appropriate audit opinion type based on findings per AU-C 705.';
+COMMENT ON FUNCTION check_report_issuance_ready IS 'Validates that all pre-issuance requirements are met before report can be issued.';
+COMMENT ON FUNCTION validate_opinion_for_issuance IS 'Validates that an audit opinion has all required fields for issuance.';

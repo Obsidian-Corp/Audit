@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { useOrganization } from '@/contexts/OrganizationContext';
+import { useAuth } from '@/contexts/AuthContext';
 
 export interface UserWithRoles {
   id: string;
@@ -11,10 +12,6 @@ export interface UserWithRoles {
   created_at: string;
   user_roles: {
     role: string;
-    client_id: string | null;
-    clients: {
-      client_name: string;
-    } | null;
   }[];
 }
 
@@ -22,72 +19,108 @@ export interface InviteUserData {
   email: string;
   full_name: string;
   role: string;
-  client_id?: string;
 }
 
 export const useUsers = () => {
   const { currentOrg } = useOrganization();
+  const { profile } = useAuth();
+
+  // Fallback to profile.firm_id if currentOrg is not available
+  const firmId = currentOrg?.id || profile?.firm_id;
 
   return useQuery({
-    queryKey: ['users', currentOrg?.id],
+    queryKey: ['users', firmId],
     queryFn: async () => {
-      if (!currentOrg) return [];
+      if (!firmId) return [];
 
-      const { data, error } = await supabase
+      // First fetch profiles from the firm
+      const { data: profiles, error: profilesError } = await supabase
         .from('profiles')
-        .select(`
-          id,
-          email,
-          full_name,
-          phone,
-          created_at,
-          user_roles!inner(
-            role,
-            client_id,
-            clients(client_name)
-          )
-        `)
-        .eq('user_roles.firm_id', currentOrg.id)
+        .select('id, email, full_name, phone, created_at, firm_id')
+        .eq('firm_id', firmId)
         .order('created_at', { ascending: false });
 
-      if (error) throw error;
-      return data as UserWithRoles[];
+      if (profilesError) {
+        console.warn('Error fetching profiles:', profilesError.message);
+        return [];
+      }
+
+      // Then fetch user_roles separately to avoid complex join issues
+      const { data: roles, error: rolesError } = await supabase
+        .from('user_roles')
+        .select('user_id, role')
+        .eq('firm_id', firmId);
+
+      if (rolesError) {
+        console.warn('Error fetching roles:', rolesError.message);
+        // Return profiles without roles
+        return (profiles || []).map(p => ({
+          ...p,
+          user_roles: []
+        })) as UserWithRoles[];
+      }
+
+      // Combine profiles with their roles
+      const usersWithRoles = (profiles || []).map(profile => {
+        const userRoles = (roles || [])
+          .filter(r => r.user_id === profile.id)
+          .map(r => ({
+            role: r.role
+          }));
+
+        return {
+          ...profile,
+          user_roles: userRoles
+        };
+      });
+
+      return usersWithRoles as UserWithRoles[];
     },
-    enabled: !!currentOrg,
+    enabled: !!firmId,
   });
 };
 
 export const useUserDetails = (userId: string) => {
   const { currentOrg } = useOrganization();
+  const { profile } = useAuth();
+
+  // Fallback to profile.firm_id if currentOrg is not available
+  const firmId = currentOrg?.id || profile?.firm_id;
 
   return useQuery({
-    queryKey: ['user', userId, currentOrg?.id],
+    queryKey: ['user', userId, firmId],
     queryFn: async () => {
-      if (!currentOrg || !userId) return null;
+      if (!firmId || !userId) return null;
 
-      const { data, error } = await supabase
+      // Fetch profile
+      const { data: profileData, error: profileError } = await supabase
         .from('profiles')
-        .select(`
-          id,
-          email,
-          full_name,
-          phone,
-          created_at,
-          user_roles!inner(
-            role,
-            client_id,
-            firm_id,
-            clients(client_name)
-          )
-        `)
+        .select('id, email, full_name, phone, created_at, firm_id')
         .eq('id', userId)
-        .eq('user_roles.firm_id', currentOrg.id)
         .single();
 
-      if (error) throw error;
-      return data as UserWithRoles;
+      if (profileError) {
+        console.warn('Error fetching user profile:', profileError.message);
+        return null;
+      }
+
+      // Fetch roles
+      const { data: roles, error: rolesError } = await supabase
+        .from('user_roles')
+        .select('role')
+        .eq('user_id', userId)
+        .eq('firm_id', firmId);
+
+      const userRoles = (roles || []).map(r => ({
+        role: r.role
+      }));
+
+      return {
+        ...profileData,
+        user_roles: userRoles
+      } as UserWithRoles;
     },
-    enabled: !!currentOrg && !!userId,
+    enabled: !!firmId && !!userId,
   });
 };
 
@@ -95,10 +128,12 @@ export const useInviteUser = () => {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const { currentOrg } = useOrganization();
+  const { profile } = useAuth();
+  const firmId = currentOrg?.id || profile?.firm_id;
 
   return useMutation({
     mutationFn: async (inviteData: InviteUserData) => {
-      if (!currentOrg) throw new Error('No organization selected');
+      if (!firmId) throw new Error('No organization selected');
 
       // Check if user already exists
       const { data: existingUser } = await supabase
@@ -113,9 +148,8 @@ export const useInviteUser = () => {
           .from('user_roles')
           .insert({
             user_id: existingUser.id,
-            firm_id: currentOrg.id,
+            firm_id: firmId,
             role: inviteData.role,
-            client_id: inviteData.client_id || null,
           });
 
         if (roleError) throw roleError;
@@ -155,6 +189,8 @@ export const useUpdateUserRoles = () => {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const { currentOrg } = useOrganization();
+  const { profile } = useAuth();
+  const firmId = currentOrg?.id || profile?.firm_id;
 
   return useMutation({
     mutationFn: async ({
@@ -163,10 +199,10 @@ export const useUpdateUserRoles = () => {
       rolesToRemove,
     }: {
       userId: string;
-      rolesToAdd: { role: string; client_id?: string }[];
+      rolesToAdd: { role: string }[];
       rolesToRemove: string[];
     }) => {
-      if (!currentOrg) throw new Error('No organization selected');
+      if (!firmId) throw new Error('No organization selected');
 
       // Remove roles
       if (rolesToRemove.length > 0) {
@@ -174,7 +210,7 @@ export const useUpdateUserRoles = () => {
           .from('user_roles')
           .delete()
           .eq('user_id', userId)
-          .eq('firm_id', currentOrg.id)
+          .eq('firm_id', firmId)
           .in('role', rolesToRemove);
 
         if (deleteError) throw deleteError;
@@ -184,9 +220,8 @@ export const useUpdateUserRoles = () => {
       if (rolesToAdd.length > 0) {
         const rolesToInsert = rolesToAdd.map(r => ({
           user_id: userId,
-          firm_id: currentOrg.id,
+          firm_id: firmId,
           role: r.role,
-          client_id: r.client_id || null,
         }));
 
         const { error: insertError } = await supabase
@@ -220,17 +255,19 @@ export const useDeactivateUser = () => {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const { currentOrg } = useOrganization();
+  const { profile } = useAuth();
+  const firmId = currentOrg?.id || profile?.firm_id;
 
   return useMutation({
     mutationFn: async (userId: string) => {
-      if (!currentOrg) throw new Error('No organization selected');
+      if (!firmId) throw new Error('No organization selected');
 
       // Remove all roles for this user in this organization
       const { error } = await supabase
         .from('user_roles')
         .delete()
         .eq('user_id', userId)
-        .eq('firm_id', currentOrg.id);
+        .eq('firm_id', firmId);
 
       if (error) throw error;
       return userId;

@@ -1,3 +1,13 @@
+/**
+ * App.tsx
+ * Ticket: NAV-004 (Route Guards)
+ *
+ * Main application with routing configuration.
+ * Uses RequireAuth for authentication and RequireRole for role-based access.
+ *
+ * @see src/config/routeGuards.ts for role requirements per route
+ */
+
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -14,6 +24,8 @@ import Settings from "./pages/Settings";
 import Login from "./pages/auth/Login";
 import ForgotPassword from "./pages/auth/ForgotPassword";
 import AcceptInvitation from "./pages/auth/AcceptInvitation";
+import AcceptFirmInvitation from "./pages/auth/AcceptFirmInvitation";
+import Signup from "./pages/auth/Signup";
 import { AppLayout } from "./components/AppLayout";
 
 // Audit Core Pages
@@ -49,10 +61,27 @@ import EngagementDetail from "./pages/engagement/EngagementDetail";
 import EngagementDetailAudit from "./pages/engagement/EngagementDetailAudit";
 import EngagementTemplates from "./pages/engagement/EngagementTemplates";
 import ApprovalDashboard from "./pages/engagement/ApprovalDashboard";
+import { EngagementDashboard } from "./pages/engagement/EngagementDashboard";
+
+// Review Queue
+import { ReviewQueuePage } from "./pages/review/ReviewQueuePage";
+
+// Inbox
+import { InboxPage } from "./pages/inbox/InboxPage";
+
+// Clients
+import { ClientsPage } from "./pages/clients";
 
 // Admin
 import UserManagement from "./pages/admin/UserManagement";
 import AdminDashboard from "./pages/admin/AdminDashboard";
+
+// Platform Product Pages (Palantir-style)
+import OntologyPage from "./pages/platform/OntologyPage";
+import AuditPage from "./pages/platform/AuditPage";
+import CodexPage from "./pages/platform/CodexPage";
+import ForgePage from "./pages/platform/ForgePage";
+import ContactPage from "./pages/platform/ContactPage";
 
 const queryClient = new QueryClient();
 
@@ -70,6 +99,18 @@ const App = () => (
               <Route path="/auth/login" element={<Login />} />
               <Route path="/auth/forgot-password" element={<ForgotPassword />} />
               <Route path="/auth/accept-invite/:token" element={<AcceptInvitation />} />
+              <Route path="/auth/accept-firm-invite/:token" element={<AcceptFirmInvitation />} />
+              <Route path="/auth/signup" element={<Signup />} />
+
+              {/* Platform Product Pages (Public - Palantir-style) */}
+              <Route path="/platform/ontology" element={<OntologyPage />} />
+              <Route path="/platform/audit" element={<AuditPage />} />
+              <Route path="/platform/codex" element={<CodexPage />} />
+              <Route path="/platform/forge" element={<ForgePage />} />
+              <Route path="/contact" element={<ContactPage />} />
+
+              {/* Portal redirect (for demo compatibility) */}
+              <Route path="/portal" element={<Navigate to="/workspace" replace />} />
 
               {/* Main Workspace */}
               <Route path="/workspace" element={<RequireAuth><AppLayout /></RequireAuth>}>
@@ -79,75 +120,85 @@ const App = () => (
               {/* Redirects */}
               <Route path="/dashboard" element={<Navigate to="/workspace" replace />} />
 
+              {/* Inbox / Notifications */}
+              <Route path="/inbox" element={<RequireAuth><AppLayout /></RequireAuth>}>
+                <Route index element={<InboxPage />} />
+              </Route>
+
+              {/* Clients */}
+              <Route path="/clients" element={<RequireAuth><AppLayout /></RequireAuth>}>
+                <Route index element={<ClientsPage />} />
+              </Route>
+
               {/* ===== AUDIT EXECUTION CORE ===== */}
 
-              {/* Audit Universe & Planning */}
-              <Route path="/universe" element={<RequireAuth><AppLayout /></RequireAuth>}>
+              {/* Audit Universe & Planning (Manager+ only) */}
+              <Route path="/universe" element={<RequireAuth><RequireRole><AppLayout /></RequireRole></RequireAuth>}>
                 <Route index element={<AuditUniverse />} />
               </Route>
-              <Route path="/risks" element={<RequireAuth><AppLayout /></RequireAuth>}>
+              <Route path="/risks" element={<RequireAuth><RequireRole><AppLayout /></RequireRole></RequireAuth>}>
                 <Route index element={<RiskAssessments />} />
               </Route>
-              <Route path="/plans" element={<RequireAuth><AppLayout /></RequireAuth>}>
+              <Route path="/plans" element={<RequireAuth><RequireRole><AppLayout /></RequireRole></RequireAuth>}>
                 <Route index element={<AuditPlans />} />
               </Route>
 
-              {/* Active Audits */}
-              <Route path="/audits" element={<RequireAuth><AppLayout /></RequireAuth>}>
+              {/* Active Audits (Internal roles) */}
+              <Route path="/audits" element={<RequireAuth><RequireRole><AppLayout /></RequireRole></RequireAuth>}>
                 <Route index element={<ActiveAuditsList />} />
               </Route>
-              <Route path="/audits/:auditId/workpapers" element={<RequireAuth><AppLayout /></RequireAuth>}>
+              <Route path="/audits/:auditId/workpapers" element={<RequireAuth><RequireRole><AppLayout /></RequireRole></RequireAuth>}>
                 <Route index element={<AuditWorkpapers />} />
               </Route>
 
-              {/* Audit Programs & Procedures */}
-              <Route path="/programs" element={<RequireAuth><AppLayout /></RequireAuth>}>
+              {/* Audit Programs & Procedures (Internal roles) */}
+              <Route path="/programs" element={<RequireAuth><RequireRole><AppLayout /></RequireRole></RequireAuth>}>
                 <Route index element={<ProgramLibrary />} />
               </Route>
-              <Route path="/programs/:id" element={<RequireAuth><AppLayout /></RequireAuth>}>
+              <Route path="/programs/:id" element={<RequireAuth><RequireRole><AppLayout /></RequireRole></RequireAuth>}>
                 <Route index element={<ProgramDetail />} />
               </Route>
-              <Route path="/procedures" element={<RequireAuth><AppLayout /></RequireAuth>}>
+              <Route path="/procedures" element={<RequireAuth><RequireRole><AppLayout /></RequireRole></RequireAuth>}>
                 <Route index element={<ProcedureLibrary />} />
               </Route>
-              <Route path="/my-procedures" element={<RequireAuth><AppLayout /></RequireAuth>}>
+              <Route path="/my-procedures" element={<RequireAuth><RequireRole><AppLayout /></RequireRole></RequireAuth>}>
                 <Route index element={<MyProcedures />} />
               </Route>
 
-              {/* Workpapers */}
-              <Route path="/workpapers" element={<RequireAuth><AppLayout /></RequireAuth>}>
+              {/* Workpapers (Internal roles) */}
+              <Route path="/workpapers" element={<RequireAuth><RequireRole><AppLayout /></RequireRole></RequireAuth>}>
                 <Route index element={<WorkpapersLanding />} />
               </Route>
-              <Route path="/workpapers/:id" element={<RequireAuth><AppLayout /></RequireAuth>}>
+              <Route path="/workpapers/:id" element={<RequireAuth><RequireRole><AppLayout /></RequireRole></RequireAuth>}>
                 <Route index element={<WorkpaperEditor />} />
               </Route>
 
-              {/* Findings & Evidence */}
-              <Route path="/findings" element={<RequireAuth><AppLayout /></RequireAuth>}>
+              {/* Findings & Evidence (Internal roles) */}
+              <Route path="/findings" element={<RequireAuth><RequireRole><AppLayout /></RequireRole></RequireAuth>}>
                 <Route index element={<FindingsManagement />} />
               </Route>
-              <Route path="/evidence" element={<RequireAuth><AppLayout /></RequireAuth>}>
+              <Route path="/evidence" element={<RequireAuth><RequireRole><AppLayout /></RequireRole></RequireAuth>}>
                 <Route index element={<EvidenceLibrary />} />
               </Route>
 
-              {/* Review & Quality Control */}
-              <Route path="/review-queue" element={<RequireAuth><AppLayout /></RequireAuth>}>
+              {/* Review & Quality Control (Senior+ roles) */}
+              <Route path="/review-queue" element={<RequireAuth><RequireRole><AppLayout /></RequireRole></RequireAuth>}>
                 <Route index element={<ProcedureReviewQueue />} />
               </Route>
-              <Route path="/quality-control" element={<RequireAuth><AppLayout /></RequireAuth>}>
+              <Route path="/quality-control" element={<RequireAuth><RequireRole><AppLayout /></RequireRole></RequireAuth>}>
                 <Route index element={<QualityControlDashboard />} />
               </Route>
 
-              {/* Tasks & Requests */}
-              <Route path="/tasks" element={<RequireAuth><AppLayout /></RequireAuth>}>
+              {/* Tasks & Requests (Internal roles) */}
+              <Route path="/tasks" element={<RequireAuth><RequireRole><AppLayout /></RequireRole></RequireAuth>}>
                 <Route index element={<TaskBoard />} />
               </Route>
-              <Route path="/information-requests" element={<RequireAuth><AppLayout /></RequireAuth>}>
+              <Route path="/information-requests" element={<RequireAuth><RequireRole><AppLayout /></RequireRole></RequireAuth>}>
                 <Route index element={<InformationRequests />} />
               </Route>
 
-              {/* Analytics */}
-              <Route path="/analytics" element={<RequireAuth><AppLayout /></RequireAuth>}>
+              {/* Analytics (Senior+ roles) */}
+              <Route path="/analytics" element={<RequireAuth><RequireRole><AppLayout /></RequireRole></RequireAuth>}>
                 <Route index element={<ProgramAnalytics />} />
               </Route>
 
@@ -172,8 +223,14 @@ const App = () => (
               <Route path="/engagements/:id" element={<RequireAuth><AppLayout /></RequireAuth>}>
                 <Route index element={<EngagementDetail />} />
               </Route>
+              <Route path="/engagements/:id/dashboard" element={<RequireAuth><AppLayout /></RequireAuth>}>
+                <Route index element={<EngagementDashboard />} />
+              </Route>
               <Route path="/engagements/:id/audit" element={<RequireAuth><AppLayout /></RequireAuth>}>
                 <Route index element={<EngagementDetailAudit />} />
+              </Route>
+              <Route path="/engagements/:id/review" element={<RequireAuth><AppLayout /></RequireAuth>}>
+                <Route index element={<ReviewQueuePage />} />
               </Route>
               <Route path="/engagements/:engagementId/assign-procedures" element={<RequireAuth><AppLayout /></RequireAuth>}>
                 <Route index element={<ProcedureAssignment />} />

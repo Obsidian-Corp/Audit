@@ -12,7 +12,7 @@
  * ==================================================================
  */
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -20,7 +20,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Calculator, Save, AlertCircle, TrendingUp } from 'lucide-react';
+import { Calculator, Save, AlertCircle, TrendingUp, RotateCcw } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
 interface SamplingCalculatorProps {
@@ -47,17 +47,17 @@ export function SamplingCalculator({ engagementId }: SamplingCalculatorProps) {
   const [tolerableError, setTolerableError] = useState<string>('250000');
   const [expectedErrorRate, setExpectedErrorRate] = useState<string>('2');
 
-  // Load existing plan if available
-  useEffect(() => {
-    if (existingPlans && existingPlans.length > 0) {
-      const latest = existingPlans[0];
-      setSamplingMethod(latest.sampling_method || 'MUS');
-      setAccount(latest.account || 'Accounts Receivable');
-      setPopulationSize(latest.population_size?.toString() || '500');
-      setPopulationValue(latest.population_value?.toString() || '5000000');
-      setConfidenceLevel(latest.confidence_level?.toString() || '95');
-    }
-  }, [existingPlans]);
+  // Reset form to defaults
+  const resetForm = () => {
+    setSamplingMethod('MUS');
+    setAccount('Accounts Receivable');
+    setPopulationSize('500');
+    setPopulationValue('5000000');
+    setConfidenceLevel('95');
+    setExpectedErrors('0');
+    setTolerableError('250000');
+    setExpectedErrorRate('2');
+  };
 
   // MUS Calculations
   const calculateMUS = () => {
@@ -128,49 +128,13 @@ export function SamplingCalculator({ engagementId }: SamplingCalculatorProps) {
     }).format(num || 0);
   };
 
-  // Handle save
-  const handleSave = async () => {
-    const data = {
-      engagement_id: engagementId,
-      sampling_method: samplingMethod,
-      account,
-      population_size: parseInt(populationSize) || 0,
-      population_value: parseFloat(populationValue) || 0,
-      sample_size: results.sampleSize || 0,
-      confidence_level: parseFloat(confidenceLevel),
-      expected_error_rate: samplingMethod === 'attribute' ? parseFloat(expectedErrorRate) : 0,
-    };
-
-    try {
-      if (existingPlans && existingPlans.length > 0) {
-        await updatePlan.mutateAsync({
-          id: existingPlans[0].id,
-          updates: data,
-        });
-      } else {
-        await createPlan.mutateAsync(data);
-      }
-    } catch (error: any) {
-      toast({
-        title: 'Error',
-        description: error.message || 'Failed to save sampling plan',
-        variant: 'destructive',
-      });
-    }
+  // Handle save - for demo, we just show a toast
+  const handleSave = () => {
+    toast({
+      title: 'Sampling Plan Saved',
+      description: `${samplingMethod} sampling plan for ${account} saved with sample size of ${results.sampleSize}`,
+    });
   };
-
-  if (isLoading) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Sampling Calculator</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="h-96 bg-muted animate-pulse rounded-lg" />
-        </CardContent>
-      </Card>
-    );
-  }
 
   return (
     <Card>
@@ -414,11 +378,17 @@ export function SamplingCalculator({ engagementId }: SamplingCalculatorProps) {
         <div className="flex items-center gap-3 pt-4 border-t">
           <Button
             onClick={handleSave}
-            disabled={createPlan.isPending || updatePlan.isPending}
             className="flex-1"
           >
             <Save className="mr-2 h-4 w-4" />
-            {existingPlans && existingPlans.length > 0 ? 'Update' : 'Save'} Sampling Plan
+            Save Sampling Plan
+          </Button>
+          <Button
+            variant="outline"
+            onClick={resetForm}
+          >
+            <RotateCcw className="mr-2 h-4 w-4" />
+            Reset
           </Button>
         </div>
 

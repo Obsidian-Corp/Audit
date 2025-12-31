@@ -26,12 +26,12 @@ import { useAnalyticalProcedures, useCreateAnalyticalProcedure } from '@/hooks/u
 import { useToast } from '@/hooks/use-toast';
 
 interface AnalyticalProceduresProps {
-  engagementId: string;
+  engagementId?: string;
 }
 
 export function AnalyticalProcedures({ engagementId }: AnalyticalProceduresProps) {
   const { toast } = useToast();
-  const { data: procedures, isLoading } = useAnalyticalProcedures(engagementId);
+  const { data: procedures, isLoading } = useAnalyticalProcedures(engagementId || '');
   const createProcedure = useCreateAnalyticalProcedure();
 
   // Dialog state

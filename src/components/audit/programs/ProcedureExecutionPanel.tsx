@@ -9,15 +9,16 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { useEngagementProcedures } from '@/hooks/useEngagementProcedures';
 import { useToast } from '@/hooks/use-toast';
-import { 
-  Clock, 
-  Play, 
-  Pause, 
-  StopCircle, 
-  FileText, 
+import {
+  Clock,
+  Play,
+  Pause,
+  StopCircle,
+  FileText,
   CheckCircle2,
   AlertCircle,
-  Timer
+  Timer,
+  AlertTriangle
 } from 'lucide-react';
 
 interface ProcedureExecutionPanelProps {
@@ -120,6 +121,17 @@ export function ProcedureExecutionPanel({
 
   const handleCreateWorkpaper = () => {
     navigate(`/audit/workpapers/new?procedureId=${procedure.id}&auditId=${procedure.engagement_programs?.audit_id}`);
+    onOpenChange(false);
+  };
+
+  const handleCreateFinding = () => {
+    // Navigate to findings page with procedure context
+    const params = new URLSearchParams({
+      procedureId: procedure.id,
+      procedureName: procedure.procedure_name || '',
+      auditId: procedure.engagement_programs?.audit_id || '',
+    });
+    navigate(`/findings?create=true&${params.toString()}`);
     onOpenChange(false);
   };
 
@@ -318,18 +330,28 @@ export function ProcedureExecutionPanel({
           <Separator />
 
           {/* Actions */}
-          <div className="flex items-center justify-between gap-3">
-            <Button
-              onClick={handleCreateWorkpaper}
-              variant="outline"
-              className="flex-1"
-            >
-              <FileText className="h-4 w-4 mr-2" />
-              Create Workpaper
-            </Button>
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center gap-3">
+              <Button
+                onClick={handleCreateWorkpaper}
+                variant="outline"
+                className="flex-1"
+              >
+                <FileText className="h-4 w-4 mr-2" />
+                Create Workpaper
+              </Button>
+              <Button
+                onClick={handleCreateFinding}
+                variant="outline"
+                className="flex-1"
+              >
+                <AlertTriangle className="h-4 w-4 mr-2" />
+                Create Finding
+              </Button>
+            </div>
             <Button
               onClick={handleSubmitForReview}
-              className="flex-1"
+              className="w-full"
               disabled={procedure?.status === 'in_review' || procedure?.status === 'complete'}
             >
               <CheckCircle2 className="h-4 w-4 mr-2" />

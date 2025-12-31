@@ -34,8 +34,8 @@ export default function ApprovalDashboard() {
         .select(`
           *,
           clients(id, client_name),
-          profiles:created_by(id, full_name, email),
-          requester:approval_requested_by(id, full_name, email)
+          created_by_profile:profiles!audits_created_by_fkey(id, full_name, email),
+          requester:profiles!audits_approval_requested_by_fkey(id, full_name, email)
         `)
         .eq("workflow_status", "pending_approval")
         .order("approval_requested_at", { ascending: true });

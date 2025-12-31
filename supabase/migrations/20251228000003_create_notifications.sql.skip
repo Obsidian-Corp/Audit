@@ -1,0 +1,192 @@
+-- =====================================================================
+-- MIGRATION: Create notifications table
+-- Ticket: DB-003
+-- Purpose: User notification system for actions, mentions, assignments,
+--          and review requests across the audit platform
+-- =====================================================================
+
+-- Create the notifications table
+CREATE TABLE IF NOT EXISTS public.notifications (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+  -- Target user
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  firm_id UUID NOT NULL REFERENCES public.firms(id) ON DELETE CASCADE,
+
+  -- Notification content
+  type VARCHAR(100) NOT NULL,
+  title TEXT NOT NULL,
+  message TEXT,
+
+  -- Related entity (for deep linking)
+  entity_type VARCHAR(50),
+  entity_id UUID,
+  action_url TEXT,
+
+  -- Sender (who triggered the notification)
+  sender_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+
+  -- Read status
+  is_read BOOLEAN DEFAULT FALSE,
+  read_at TIMESTAMPTZ,
+
+  -- Archive status
+  is_archived BOOLEAN DEFAULT FALSE,
+  archived_at TIMESTAMPTZ,
+
+  -- Priority
+  priority VARCHAR(20) DEFAULT 'normal' CHECK (priority IN ('low', 'normal', 'high', 'urgent')),
+
+  -- Expiration (optional)
+  expires_at TIMESTAMPTZ,
+
+  -- Metadata
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Create indexes for common queries
+CREATE INDEX IF NOT EXISTS idx_notifications_user_unread
+  ON public.notifications(user_id, is_read, is_archived)
+  WHERE is_archived = FALSE;
+
+CREATE INDEX IF NOT EXISTS idx_notifications_user_all
+  ON public.notifications(user_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_notifications_created
+  ON public.notifications(created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_notifications_entity
+  ON public.notifications(entity_type, entity_id);
+
+CREATE INDEX IF NOT EXISTS idx_notifications_type
+  ON public.notifications(type);
+
+CREATE INDEX IF NOT EXISTS idx_notifications_priority
+  ON public.notifications(priority)
+  WHERE priority IN ('high', 'urgent');
+
+-- Enable Row Level Security
+ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
+
+-- RLS Policy: Users can only view their own notifications
+CREATE POLICY "Users can view their own notifications"
+  ON public.notifications
+  FOR SELECT
+  TO authenticated
+  USING (user_id = auth.uid());
+
+-- RLS Policy: Users can update their own notifications (mark read, archive)
+CREATE POLICY "Users can update their own notifications"
+  ON public.notifications
+  FOR UPDATE
+  TO authenticated
+  USING (user_id = auth.uid())
+  WITH CHECK (user_id = auth.uid());
+
+-- RLS Policy: System can create notifications (via service role or triggers)
+CREATE POLICY "System can create notifications"
+  ON public.notifications
+  FOR INSERT
+  TO authenticated
+  WITH CHECK (
+    -- Allow creating notifications for users in the same firm
+    firm_id = public.user_firm_id(auth.uid())
+  );
+
+-- RLS Policy: Users can delete their own notifications
+CREATE POLICY "Users can delete their own notifications"
+  ON public.notifications
+  FOR DELETE
+  TO authenticated
+  USING (user_id = auth.uid());
+
+-- Helper function: Create a notification
+CREATE OR REPLACE FUNCTION public.create_notification(
+  p_user_id UUID,
+  p_type VARCHAR(100),
+  p_title TEXT,
+  p_message TEXT DEFAULT NULL,
+  p_entity_type VARCHAR(50) DEFAULT NULL,
+  p_entity_id UUID DEFAULT NULL,
+  p_action_url TEXT DEFAULT NULL,
+  p_sender_id UUID DEFAULT NULL,
+  p_priority VARCHAR(20) DEFAULT 'normal'
+)
+RETURNS UUID
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  v_firm_id UUID;
+  v_notification_id UUID;
+BEGIN
+  -- Get the user's firm
+  SELECT firm_id INTO v_firm_id
+  FROM public.profiles
+  WHERE id = p_user_id;
+
+  IF v_firm_id IS NULL THEN
+    RAISE EXCEPTION 'User not found or has no firm';
+  END IF;
+
+  -- Insert the notification
+  INSERT INTO public.notifications (
+    user_id, firm_id, type, title, message,
+    entity_type, entity_id, action_url, sender_id, priority
+  ) VALUES (
+    p_user_id, v_firm_id, p_type, p_title, p_message,
+    p_entity_type, p_entity_id, p_action_url, p_sender_id, p_priority
+  )
+  RETURNING id INTO v_notification_id;
+
+  RETURN v_notification_id;
+END;
+$$;
+
+-- Helper function: Mark all notifications as read
+CREATE OR REPLACE FUNCTION public.mark_all_notifications_read()
+RETURNS INTEGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  v_count INTEGER;
+BEGIN
+  UPDATE public.notifications
+  SET is_read = TRUE, read_at = NOW()
+  WHERE user_id = auth.uid()
+    AND is_read = FALSE;
+
+  GET DIAGNOSTICS v_count = ROW_COUNT;
+  RETURN v_count;
+END;
+$$;
+
+-- Helper function: Get unread notification count
+CREATE OR REPLACE FUNCTION public.get_unread_notification_count()
+RETURNS INTEGER
+LANGUAGE sql
+SECURITY DEFINER
+STABLE
+AS $$
+  SELECT COUNT(*)::INTEGER
+  FROM public.notifications
+  WHERE user_id = auth.uid()
+    AND is_read = FALSE
+    AND is_archived = FALSE;
+$$;
+
+-- Notification types enum (for reference, not enforced)
+COMMENT ON COLUMN public.notifications.type IS 'Notification types: procedure_assigned, review_requested, signoff_required, note_added, note_resolved, finding_created, deadline_approaching, mention, etc.';
+
+-- Add comments for documentation
+COMMENT ON TABLE public.notifications IS 'User notifications for actions, mentions, assignments, and review requests';
+COMMENT ON COLUMN public.notifications.entity_type IS 'Type of related entity: workpaper, procedure, finding, engagement, etc.';
+COMMENT ON COLUMN public.notifications.action_url IS 'Deep link URL to navigate to when notification is clicked';
+COMMENT ON COLUMN public.notifications.expires_at IS 'Optional expiration date after which notification can be auto-archived';
+
+-- Success message
+DO $$
+BEGIN
+  RAISE NOTICE '✅ DB-003: notifications table created successfully';
+END $$;

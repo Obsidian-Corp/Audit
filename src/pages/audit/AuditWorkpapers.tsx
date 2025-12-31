@@ -7,7 +7,6 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Breadcrumbs } from '@/components/ui/breadcrumbs';
 import {
   Select,
   SelectContent,
@@ -152,21 +151,13 @@ export default function AuditWorkpapers() {
   return (
     <div className="min-h-screen bg-background">
       <div className="container mx-auto p-6 md:p-8 space-y-6">
-        <Breadcrumbs
-          items={[
-            { label: 'Dashboard', href: '/dashboard' },
-            { label: 'Audit Overview', href: '/audit-overview' },
-            { label: 'Workpapers' },
-          ]}
-        />
-
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
             <div className="flex items-center gap-3">
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => navigate('/audit-overview')}
+                onClick={() => navigate('/workpapers')}
               >
                 <ArrowLeft className="w-4 h-4" />
               </Button>

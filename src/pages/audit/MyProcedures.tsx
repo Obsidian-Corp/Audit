@@ -9,14 +9,15 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Progress } from '@/components/ui/progress';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ProcedureExecutionPanel } from '@/components/audit/programs';
-import { 
-  Clock, 
-  PlayCircle, 
-  CheckCircle2, 
-  AlertCircle, 
+import {
+  Clock,
+  PlayCircle,
+  CheckCircle2,
+  AlertCircle,
   Calendar as CalendarIcon,
   ExternalLink,
-  FileText
+  FileText,
+  ClipboardList
 } from 'lucide-react';
 import { format, isPast } from 'date-fns';
 import { cn } from '@/lib/utils';
@@ -171,9 +172,24 @@ export default function MyProcedures() {
 
         {Object.entries(proceduresByStatus).map(([status, procs]) => (
           <TabsContent key={status} value={status} className="space-y-6">
+            {/* Empty state when no procedures at all */}
+            {procedures?.length === 0 && (
+              <Card>
+                <CardContent className="py-12 text-center">
+                  <ClipboardList className="h-12 w-12 mx-auto mb-4 text-muted-foreground/30" />
+                  <h3 className="text-lg font-medium mb-2">No Procedures Assigned</h3>
+                  <p className="text-muted-foreground mb-4">
+                    You don't have any procedures assigned to you yet.
+                  </p>
+                  <Button variant="outline" onClick={() => navigate('/engagements')}>
+                    Browse Engagements
+                  </Button>
+                </CardContent>
+              </Card>
+            )}
             {Object.entries(proceduresByEngagement).map(([engId, data]: [string, any]) => {
-              const filteredProcs = status === 'all' 
-                ? data.procedures 
+              const filteredProcs = status === 'all'
+                ? data.procedures
                 : data.procedures.filter((p: any) => p.status === status);
 
               if (filteredProcs.length === 0) return null;

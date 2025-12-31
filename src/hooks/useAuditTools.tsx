@@ -447,20 +447,27 @@ export const useUpdateMateriality = () => {
 // 3. CONFIRMATIONS HOOKS
 // =================================================================
 
-export const useConfirmations = (engagementId: string) => {
+export const useConfirmations = (engagementId?: string) => {
   return useQuery({
-    queryKey: ['confirmations', engagementId],
+    queryKey: ['confirmations', engagementId || 'all'],
     queryFn: async () => {
-      const { data, error } = await supabase
+      let query = supabase
         .from('confirmations')
-        .select('*')
-        .eq('engagement_id', engagementId)
+        .select('*, audit:audits(audit_number, audit_title)')
         .order('as_of_date', { ascending: false });
 
+      // If engagementId is provided, filter by it; otherwise show all (RLS will filter by firm)
+      if (engagementId) {
+        query = query.eq('engagement_id', engagementId);
+      }
+
+      const { data, error } = await query;
+
       if (error) throw error;
-      return data as Confirmation[];
+      return data as (Confirmation & { audit?: { audit_number: string; audit_title: string } })[];
     },
-    enabled: !!engagementId,
+    // Always enabled - RLS handles firm-level filtering
+    enabled: true,
   });
 };
 

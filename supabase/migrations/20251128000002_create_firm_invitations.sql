@@ -1,6 +1,9 @@
 -- Create firm invitations table
 -- Platform admins use this to invite new firms to the platform
 
+-- Ensure pgcrypto extension is available for gen_random_bytes
+CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA extensions;
+
 CREATE TABLE IF NOT EXISTS public.firm_invitations (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   invited_by UUID REFERENCES platform_admin.admin_users(id) ON DELETE SET NULL,
@@ -10,7 +13,7 @@ CREATE TABLE IF NOT EXISTS public.firm_invitations (
   admin_first_name TEXT,
   admin_last_name TEXT,
   admin_job_title TEXT DEFAULT 'Managing Partner',
-  token TEXT UNIQUE NOT NULL DEFAULT encode(gen_random_bytes(32), 'hex'),
+  token TEXT UNIQUE NOT NULL DEFAULT encode(extensions.gen_random_bytes(32), 'hex'),
   expires_at TIMESTAMPTZ NOT NULL DEFAULT (now() + interval '30 days'),
   accepted_at TIMESTAMPTZ,
   created_firm_id UUID REFERENCES public.firms(id) ON DELETE SET NULL,
@@ -86,7 +89,7 @@ DECLARE
   v_token TEXT;
 BEGIN
   -- Generate unique token
-  v_token := encode(gen_random_bytes(32), 'hex');
+  v_token := encode(extensions.gen_random_bytes(32), 'hex');
 
   -- Create invitation
   INSERT INTO public.firm_invitations (

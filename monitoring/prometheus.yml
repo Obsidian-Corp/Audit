@@ -1,0 +1,53 @@
+# =====================================================
+# OBSIDIAN AUDIT - PROMETHEUS CONFIGURATION
+# Metrics collection and monitoring
+# =====================================================
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+  external_labels:
+    monitor: 'obsidian-audit'
+    environment: 'production'
+
+# Alerting rules
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+
+# Rule files
+rule_files: []
+
+# Scrape configurations
+scrape_configs:
+  # Self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Application metrics (if exposed)
+  - job_name: 'obsidian-audit'
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['app:80']
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: 'obsidian-audit'
+
+  # Node exporter for system metrics
+  - job_name: 'node'
+    static_configs:
+      - targets: ['node-exporter:9100']
+
+  # Docker container metrics
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+
+  # Redis metrics (if using)
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis-exporter:9121']

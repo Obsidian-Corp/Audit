@@ -33,7 +33,7 @@ export function CommandPalette() {
   const commands: Command[] = [
     // Navigation
     { id: "nav-dashboard", title: "Go to Dashboard", icon: Home, action: () => navigate("/dashboard"), category: "Navigation", keywords: ["home", "dashboard"] },
-    { id: "nav-audit", title: "Go to Audit Overview", icon: LayoutDashboard, action: () => navigate("/audit-overview"), category: "Navigation", keywords: ["audit", "overview"] },
+    { id: "nav-audit", title: "Go to Engagements", icon: LayoutDashboard, action: () => navigate("/engagements"), category: "Navigation", keywords: ["audit", "engagements", "overview"] },
     { id: "nav-universe", title: "Go to Audit Universe", icon: FolderKanban, action: () => navigate("/universe"), category: "Navigation", keywords: ["universe", "entities"] },
     { id: "nav-team", title: "Go to Team", icon: Users, action: () => navigate("/dashboard/team"), category: "Navigation", keywords: ["team", "members", "people"] },
     { id: "nav-portfolio", title: "Go to Portfolio", icon: BarChart3, action: () => navigate("/dashboard/portfolio"), category: "Navigation", keywords: ["portfolio", "management"] },

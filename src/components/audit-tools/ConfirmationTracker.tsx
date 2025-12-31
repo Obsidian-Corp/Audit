@@ -28,7 +28,7 @@ import { useToast } from '@/hooks/use-toast';
 import { format } from 'date-fns';
 
 interface ConfirmationTrackerProps {
-  engagementId: string;
+  engagementId?: string;
 }
 
 export function ConfirmationTracker({ engagementId }: ConfirmationTrackerProps) {
@@ -113,14 +113,21 @@ export function ConfirmationTracker({ engagementId }: ConfirmationTrackerProps) 
   const apConfirmations = confirmations?.filter(
     (c) => c.confirmation_type === 'accounts_payable'
   );
-  const bankConfirmations = confirmations?.filter((c) => c.confirmation_type === 'bank');
+  // Handle both 'bank' and 'bank_account' types
+  const bankConfirmations = confirmations?.filter(
+    (c) => c.confirmation_type === 'bank' || c.confirmation_type === 'bank_account'
+  );
+  // Legal letters and other confirmation types
+  const otherConfirmations = confirmations?.filter(
+    (c) => !['accounts_receivable', 'accounts_payable', 'bank', 'bank_account'].includes(c.confirmation_type)
+  );
 
-  // Calculate stats
+  // Calculate stats - use status field instead of response_received
   const calculateStats = (list: any[] = []) => {
     const sent = list.length;
-    const received = list.filter((c) => c.response_received).length;
-    const pending = sent - received;
-    const exceptions = list.filter((c) => c.exceptions).length;
+    const received = list.filter((c) => ['received', 'resolved'].includes(c.status)).length;
+    const pending = list.filter((c) => ['pending', 'sent'].includes(c.status)).length;
+    const exceptions = list.filter((c) => c.exception_type || c.status === 'exception').length;
     const responseRate = sent > 0 ? Math.round((received / sent) * 100) : 0;
 
     return { sent, received, pending, exceptions, responseRate };
@@ -141,6 +148,53 @@ export function ConfirmationTracker({ engagementId }: ConfirmationTrackerProps) 
     }).format(value);
   };
 
+  // Get status badge based on confirmation status
+  const getStatusBadge = (confirmation: any) => {
+    switch (confirmation.status) {
+      case 'resolved':
+        return (
+          <Badge className="bg-green-600">
+            <CheckCircle className="h-3 w-3 mr-1" />
+            Resolved
+          </Badge>
+        );
+      case 'received':
+        return (
+          <Badge className="bg-blue-600">
+            <CheckCircle className="h-3 w-3 mr-1" />
+            Received
+          </Badge>
+        );
+      case 'sent':
+        return (
+          <Badge variant="outline">
+            <Clock className="h-3 w-3 mr-1" />
+            Sent
+          </Badge>
+        );
+      case 'alternative_procedures':
+        return (
+          <Badge variant="secondary">
+            Alt. Procedures
+          </Badge>
+        );
+      case 'exception':
+        return (
+          <Badge variant="destructive">
+            <AlertTriangle className="h-3 w-3 mr-1" />
+            Exception
+          </Badge>
+        );
+      default:
+        return (
+          <Badge variant="outline">
+            <Clock className="h-3 w-3 mr-1" />
+            Pending
+          </Badge>
+        );
+    }
+  };
+
   // Render confirmation table
   const renderConfirmationTable = (list: any[] = [], type: string) => {
     if (list.length === 0) {
@@ -148,7 +202,7 @@ export function ConfirmationTracker({ engagementId }: ConfirmationTrackerProps) 
         <div className="text-center py-12 text-muted-foreground">
           <Mail className="h-12 w-12 mx-auto mb-4 opacity-50" />
           <p>No {type} confirmations yet</p>
-          <p className="text-sm mt-2">Click "Add Confirmation" to create one</p>
+          <p className="text-sm mt-2">{engagementId ? 'Click "Add Confirmation" to create one' : 'Select an engagement to add confirmations'}</p>
         </div>
       );
     }
@@ -157,45 +211,43 @@ export function ConfirmationTracker({ engagementId }: ConfirmationTrackerProps) 
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Name</TableHead>
-            <TableHead>Amount</TableHead>
-            <TableHead>Sent Date</TableHead>
+            {!engagementId && <TableHead>Engagement</TableHead>}
+            <TableHead>Account Name</TableHead>
+            <TableHead>Balance</TableHead>
+            <TableHead>As Of Date</TableHead>
             <TableHead>Status</TableHead>
-            <TableHead>Exceptions</TableHead>
+            <TableHead>Exception</TableHead>
             <TableHead>Actions</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {list.map((confirmation) => (
             <TableRow key={confirmation.id}>
-              <TableCell className="font-medium">{confirmation.customer_vendor_name}</TableCell>
-              <TableCell>{formatCurrency(confirmation.amount)}</TableCell>
-              <TableCell>{format(new Date(confirmation.confirmation_date), 'MMM dd, yyyy')}</TableCell>
+              {!engagementId && (
+                <TableCell className="text-sm">
+                  {confirmation.audit?.audit_number || '—'}
+                </TableCell>
+              )}
+              <TableCell className="font-medium">{confirmation.account_name}</TableCell>
+              <TableCell>{formatCurrency(confirmation.balance_per_books || 0)}</TableCell>
               <TableCell>
-                {confirmation.response_received ? (
-                  <Badge className="bg-green-600">
-                    <CheckCircle className="h-3 w-3 mr-1" />
-                    Received
-                  </Badge>
-                ) : (
-                  <Badge variant="outline">
-                    <Clock className="h-3 w-3 mr-1" />
-                    Pending
-                  </Badge>
-                )}
+                {confirmation.as_of_date && format(new Date(confirmation.as_of_date), 'MMM dd, yyyy')}
               </TableCell>
               <TableCell>
-                {confirmation.exceptions ? (
+                {getStatusBadge(confirmation)}
+              </TableCell>
+              <TableCell>
+                {confirmation.exception_type ? (
                   <Badge variant="destructive">
                     <AlertTriangle className="h-3 w-3 mr-1" />
-                    Yes
+                    {confirmation.exception_type.replace('_', ' ')}
                   </Badge>
                 ) : (
                   <span className="text-muted-foreground">-</span>
                 )}
               </TableCell>
               <TableCell>
-                {!confirmation.response_received && (
+                {confirmation.status === 'sent' && (
                   <Button
                     variant="outline"
                     size="sm"
@@ -238,13 +290,14 @@ export function ConfirmationTracker({ engagementId }: ConfirmationTrackerProps) 
           </div>
           <div className="flex items-center gap-3">
             <Badge variant="outline">AU-C 505</Badge>
-            <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-              <DialogTrigger asChild>
-                <Button>
-                  <Plus className="mr-2 h-4 w-4" />
-                  Add Confirmation
-                </Button>
-              </DialogTrigger>
+            {engagementId && (
+              <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+                <DialogTrigger asChild>
+                  <Button>
+                    <Plus className="mr-2 h-4 w-4" />
+                    Add Confirmation
+                  </Button>
+                </DialogTrigger>
               <DialogContent>
                 <DialogHeader>
                   <DialogTitle>Add Confirmation Request</DialogTitle>
@@ -303,6 +356,7 @@ export function ConfirmationTracker({ engagementId }: ConfirmationTrackerProps) 
                 </DialogFooter>
               </DialogContent>
             </Dialog>
+          )}
           </div>
         </div>
       </CardHeader>

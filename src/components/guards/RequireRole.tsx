@@ -1,77 +1,112 @@
+/**
+ * RequireRole Guard
+ * Ticket: NAV-004
+ *
+ * Protects routes by verifying the user has one of the allowed roles.
+ * Can use explicit allowedRoles prop or auto-detect from route configuration.
+ *
+ * @see src/config/routeGuards.ts for route configuration
+ */
+
 import { ReactNode, useEffect, useState } from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/integrations/supabase/client';
 import { Loader2, ShieldAlert } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { findRouteGuard } from '@/config/routeGuards';
 
 interface RequireRoleProps {
   children: ReactNode;
-  allowedRoles: string[];
+  /** Explicit roles allowed (overrides route config) */
+  allowedRoles?: string[];
+  /** Where to redirect if unauthorized (default: /workspace) */
   fallbackPath?: string;
+  /** Show unauthorized page instead of redirecting */
   showUnauthorized?: boolean;
+  /** Use route configuration to determine roles (default: true) */
+  useRouteConfig?: boolean;
 }
 
 /**
  * RequireRole Guard
  *
- * Protects routes by verifying the user has one of the allowed roles.
- *
- * Usage:
+ * Usage with explicit roles:
  * <RequireRole allowedRoles={['partner', 'firm_administrator']}>
- *   <AnalyticsPage />
+ *   <AdminPage />
  * </RequireRole>
  *
- * Props:
- * - allowedRoles: Array of role names that can access this route
- * - fallbackPath: Where to redirect if unauthorized (default: /dashboard)
- * - showUnauthorized: Show unauthorized page instead of redirecting
+ * Usage with auto-detection (uses routeGuards config):
+ * <RequireRole>
+ *   <ProtectedPage />
+ * </RequireRole>
  */
 export function RequireRole({
   children,
   allowedRoles,
-  fallbackPath = '/dashboard',
-  showUnauthorized = false
+  fallbackPath,
+  showUnauthorized = false,
+  useRouteConfig = true,
 }: RequireRoleProps) {
-  const { user, isLoading: authLoading } = useAuth();
+  const { user, roles: authRoles, isLoading: authLoading } = useAuth();
+  const location = useLocation();
   const [hasRole, setHasRole] = useState<boolean | null>(null);
-  const [userRoles, setUserRoles] = useState<string[]>([]);
+
+  // Determine effective allowed roles
+  const getEffectiveRoles = (): string[] => {
+    // Explicit roles take precedence
+    if (allowedRoles && allowedRoles.length > 0) {
+      return allowedRoles;
+    }
+
+    // Use route config if enabled
+    if (useRouteConfig) {
+      const guard = findRouteGuard(location.pathname);
+      if (guard) {
+        return guard.allowedRoles;
+      }
+    }
+
+    // No roles required = open route
+    return [];
+  };
+
+  // Determine effective fallback path
+  const getEffectiveFallback = (): string => {
+    if (fallbackPath) return fallbackPath;
+
+    if (useRouteConfig) {
+      const guard = findRouteGuard(location.pathname);
+      if (guard?.fallbackPath) return guard.fallbackPath;
+    }
+
+    return '/workspace';
+  };
+
+  const effectiveRoles = getEffectiveRoles();
+  const effectiveFallback = getEffectiveFallback();
 
   useEffect(() => {
-    if (user && !authLoading) {
+    if (!authLoading) {
       checkRole();
     }
-  }, [user, authLoading]);
+  }, [authLoading, authRoles, effectiveRoles]);
 
-  const checkRole = async () => {
+  const checkRole = () => {
+    // No roles required = open route
+    if (effectiveRoles.length === 0) {
+      setHasRole(true);
+      return;
+    }
+
     if (!user) {
       setHasRole(false);
       return;
     }
 
-    try {
-      const { data, error } = await supabase
-        .from('user_roles')
-        .select('role')
-        .eq('user_id', user.id);
-
-      if (error) {
-        console.error('Error checking user roles:', error);
-        setHasRole(false);
-        return;
-      }
-
-      const roles = data?.map(r => r.role) || [];
-      setUserRoles(roles);
-
-      // Check if user has at least one of the allowed roles
-      const hasPermission = roles.some(role => allowedRoles.includes(role));
-      setHasRole(hasPermission);
-    } catch (error) {
-      console.error('Error in role check:', error);
-      setHasRole(false);
-    }
+    // Use roles from AuthContext (already fetched)
+    const hasPermission = authRoles.some(role => effectiveRoles.includes(role));
+    setHasRole(hasPermission);
   };
 
   // Loading state
@@ -101,23 +136,25 @@ export function RequireRole({
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="bg-muted p-4 rounded-lg space-y-2">
-              <p className="text-sm font-medium">Required Roles:</p>
-              <ul className="text-sm text-muted-foreground space-y-1">
-                {allowedRoles.map(role => (
-                  <li key={role} className="flex items-center gap-2">
-                    <span className="h-1.5 w-1.5 rounded-full bg-primary"></span>
-                    {role.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
-                  </li>
-                ))}
-              </ul>
-            </div>
+            {effectiveRoles.length > 0 && (
+              <div className="bg-muted p-4 rounded-lg space-y-2">
+                <p className="text-sm font-medium">Required Roles:</p>
+                <ul className="text-sm text-muted-foreground space-y-1">
+                  {effectiveRoles.map(role => (
+                    <li key={role} className="flex items-center gap-2">
+                      <span className="h-1.5 w-1.5 rounded-full bg-primary"></span>
+                      {role.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
-            {userRoles.length > 0 && (
+            {authRoles.length > 0 && (
               <div className="bg-muted p-4 rounded-lg space-y-2">
                 <p className="text-sm font-medium">Your Roles:</p>
                 <ul className="text-sm text-muted-foreground space-y-1">
-                  {userRoles.map(role => (
+                  {authRoles.map(role => (
                     <li key={role} className="flex items-center gap-2">
                       <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground"></span>
                       {role.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
@@ -131,8 +168,8 @@ export function RequireRole({
               <Button onClick={() => window.history.back()} variant="outline" className="flex-1">
                 Go Back
               </Button>
-              <Button onClick={() => window.location.href = fallbackPath} className="flex-1">
-                Go to Dashboard
+              <Button onClick={() => window.location.href = effectiveFallback} className="flex-1">
+                Go to Workspace
               </Button>
             </div>
           </CardContent>
@@ -143,7 +180,7 @@ export function RequireRole({
 
   // Unauthorized - redirect
   if (!hasRole) {
-    return <Navigate to={fallbackPath} replace />;
+    return <Navigate to={effectiveFallback} replace />;
   }
 
   // Authorized

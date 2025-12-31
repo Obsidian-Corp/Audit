@@ -37,7 +37,7 @@ interface EngagementHeaderProps {
 
 export function EngagementHeader({ engagement }: EngagementHeaderProps) {
   // Calculate budget variance
-  const budgetHours = engagement?.budgeted_hours || 0;
+  const budgetHours = engagement?.budget_hours || 0;
   const hoursSpent = engagement?.hours_spent || 87; // TODO: Get actual from time entries
   const budgetVariancePercentage =
     budgetHours > 0 ? ((hoursSpent - budgetHours) / budgetHours) * 100 : 0;
@@ -84,7 +84,7 @@ export function EngagementHeader({ engagement }: EngagementHeaderProps) {
               <div className="flex items-center gap-4 mt-2 text-sm text-muted-foreground">
                 <span className="flex items-center gap-1">
                   <Building2 className="h-4 w-4" />
-                  {engagement?.client?.name || 'No client'}
+                  {engagement?.client?.client_name || 'No client'}
                 </span>
                 <span>•</span>
                 <span>{engagement?.audit_number || 'No number'}</span>

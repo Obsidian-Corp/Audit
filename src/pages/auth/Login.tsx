@@ -27,7 +27,7 @@ export default function Login() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     try {
       const validated = loginSchema.parse({ email, password });
       setLoading(true);
@@ -47,8 +47,8 @@ export default function Login() {
         title: 'Welcome back!',
         description: 'You have successfully logged in.',
       });
-      
-      navigate('/');
+
+      navigate('/workspace');
     } catch (error) {
       if (error instanceof z.ZodError) {
         toast({

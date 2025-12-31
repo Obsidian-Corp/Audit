@@ -1,0 +1,909 @@
+-- =====================================================
+-- OBSIDIAN AUDIT PLATFORM - PROFESSIONAL STANDARDS PHASE 2
+-- Independence Management & Engagement Acceptance
+-- Standards: AICPA Ethics, AU-C 210, PCAOB AS 2101, ISA 210
+-- =====================================================
+
+-- =====================================================
+-- PART 1: INDEPENDENCE MANAGEMENT SYSTEM
+-- Requirement: Track and confirm independence per AICPA/PCAOB rules
+-- =====================================================
+
+-- Annual Firm-Wide Independence Declarations
+CREATE TABLE IF NOT EXISTS independence_declarations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  firm_id UUID NOT NULL,
+  user_id UUID NOT NULL REFERENCES auth.users(id),
+
+  -- Declaration type
+  declaration_type TEXT NOT NULL, -- 'annual_firm', 'engagement_specific', 'project_assignment'
+  engagement_id UUID, -- NULL for annual firm-wide declarations
+
+  -- Reporting period
+  declaration_period_start DATE,
+  declaration_period_end DATE,
+
+  -- Financial Interests (Rule 101)
+  has_direct_financial_interest BOOLEAN NOT NULL DEFAULT false,
+  direct_financial_interest_details TEXT,
+  has_indirect_material_interest BOOLEAN NOT NULL DEFAULT false,
+  indirect_financial_interest_details TEXT,
+
+  -- Employment Relationships
+  has_employment_relationship BOOLEAN NOT NULL DEFAULT false,
+  employment_relationship_details TEXT,
+  former_employment_within_year BOOLEAN NOT NULL DEFAULT false,
+  former_employment_details TEXT,
+
+  -- Family Relationships (Covered Persons)
+  has_immediate_family_relationship BOOLEAN NOT NULL DEFAULT false,
+  immediate_family_details TEXT,
+  has_close_family_relationship BOOLEAN NOT NULL DEFAULT false,
+  close_family_details TEXT,
+
+  -- Business Relationships
+  has_business_relationship BOOLEAN NOT NULL DEFAULT false,
+  business_relationship_details TEXT,
+
+  -- Loans and Guarantees
+  has_loans_with_client BOOLEAN NOT NULL DEFAULT false,
+  loan_details TEXT,
+
+  -- Non-Audit Services
+  aware_of_prohibited_services BOOLEAN NOT NULL DEFAULT false,
+  prohibited_services_details TEXT,
+
+  -- Fee Matters (UK: >15% rule for PIEs)
+  fee_dependency_percentage DECIMAL,
+  fee_dependency_concerns TEXT,
+
+  -- Partner Rotation (where applicable)
+  years_on_engagement INTEGER,
+  rotation_required BOOLEAN DEFAULT false,
+
+  -- Overall Declaration
+  is_independent BOOLEAN NOT NULL,
+  exceptions_noted TEXT,
+  safeguards_applied TEXT,
+  threat_assessment JSONB, -- Array of {threat_type, severity, safeguard}
+
+  -- Attestation
+  declared_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  declaration_text TEXT, -- The actual declaration statement signed
+  digital_signature JSONB, -- {ip_address, user_agent, timestamp}
+
+  -- Expiration
+  expires_at DATE,
+
+  -- Review
+  reviewed_by UUID REFERENCES auth.users(id),
+  reviewed_at TIMESTAMPTZ,
+  review_notes TEXT,
+
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+
+  CONSTRAINT valid_declaration_period CHECK (declaration_period_end >= declaration_period_start)
+);
+
+-- Index for independence queries
+CREATE INDEX IF NOT EXISTS idx_independence_firm ON independence_declarations(firm_id);
+CREATE INDEX IF NOT EXISTS idx_independence_user ON independence_declarations(user_id);
+CREATE INDEX IF NOT EXISTS idx_independence_engagement ON independence_declarations(engagement_id);
+CREATE INDEX IF NOT EXISTS idx_independence_expiry ON independence_declarations(expires_at);
+
+-- Conflict of Interest Register
+CREATE TABLE IF NOT EXISTS conflict_of_interest_register (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  firm_id UUID NOT NULL,
+
+  -- Conflict identification
+  conflict_type TEXT NOT NULL, -- 'financial', 'employment', 'family', 'business', 'legal', 'other'
+  conflict_description TEXT NOT NULL,
+
+  -- Parties involved
+  client_id UUID,
+  engagement_id UUID,
+  user_ids UUID[], -- Staff members involved
+
+  -- Status
+  status TEXT NOT NULL DEFAULT 'identified', -- 'identified', 'under_review', 'mitigated', 'unresolved', 'cleared'
+  identified_date DATE NOT NULL DEFAULT CURRENT_DATE,
+  identified_by UUID REFERENCES auth.users(id),
+
+  -- Assessment
+  severity TEXT, -- 'low', 'moderate', 'high', 'prohibitive'
+  impact_assessment TEXT,
+
+  -- Mitigation
+  mitigation_applied TEXT,
+  safeguards JSONB, -- Array of safeguards applied
+  mitigation_effective BOOLEAN,
+  mitigation_date DATE,
+
+  -- Resolution
+  resolution TEXT,
+  resolved_date DATE,
+  resolved_by UUID REFERENCES auth.users(id),
+
+  -- Documentation
+  supporting_documents JSONB, -- Array of document references
+
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_conflicts_firm ON conflict_of_interest_register(firm_id);
+CREATE INDEX IF NOT EXISTS idx_conflicts_client ON conflict_of_interest_register(client_id);
+CREATE INDEX IF NOT EXISTS idx_conflicts_status ON conflict_of_interest_register(status);
+
+-- =====================================================
+-- PART 2: CLIENT RISK ASSESSMENT
+-- Requirement: Evaluate client before acceptance (AU-C 210)
+-- =====================================================
+
+CREATE TABLE IF NOT EXISTS client_risk_assessments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  client_id UUID NOT NULL,
+  firm_id UUID NOT NULL,
+
+  -- Assessment context
+  assessment_type TEXT NOT NULL, -- 'initial_acceptance', 'annual_continuance', 'triggered_reassessment'
+  assessment_date DATE NOT NULL DEFAULT CURRENT_DATE,
+  fiscal_year_end DATE,
+
+  -- MANAGEMENT INTEGRITY (Critical Factor)
+  management_integrity_score INTEGER CHECK (management_integrity_score BETWEEN 1 AND 5),
+  integrity_factors JSONB,
+  /*
+  {
+    reputation_in_community: {score: 1-5, notes: string},
+    prior_auditor_issues: {score: 1-5, notes: string},
+    regulatory_history: {score: 1-5, notes: string},
+    litigation_history: {score: 1-5, notes: string},
+    management_turnover: {score: 1-5, notes: string},
+    attitude_toward_controls: {score: 1-5, notes: string}
+  }
+  */
+  integrity_concerns TEXT,
+  integrity_red_flags BOOLEAN DEFAULT false,
+
+  -- FINANCIAL STABILITY
+  financial_stability_score INTEGER CHECK (financial_stability_score BETWEEN 1 AND 5),
+  financial_indicators JSONB,
+  /*
+  {
+    profitability_trend: string,
+    liquidity_position: string,
+    debt_levels: string,
+    cash_flow_adequacy: string,
+    credit_rating: string,
+    covenant_compliance: boolean
+  }
+  */
+  going_concern_indicators BOOLEAN DEFAULT false,
+  financial_concerns TEXT,
+
+  -- REPUTATIONAL RISK
+  reputational_risk_score INTEGER CHECK (reputational_risk_score BETWEEN 1 AND 5),
+  reputational_factors JSONB,
+  /*
+  {
+    media_coverage: string,
+    regulatory_sanctions: boolean,
+    industry_reputation: string,
+    association_risk: string
+  }
+  */
+  reputational_concerns TEXT,
+
+  -- BUSINESS COMPLEXITY
+  complexity_score INTEGER CHECK (complexity_score BETWEEN 1 AND 5),
+  complexity_factors JSONB,
+  /*
+  {
+    industry: string,
+    geographic_spread: string,
+    transaction_complexity: string,
+    accounting_complexity: string,
+    it_environment_complexity: string,
+    related_party_complexity: string
+  }
+  */
+
+  -- FEE CONSIDERATIONS
+  fee_collectability_risk TEXT, -- 'low', 'moderate', 'high'
+  fee_adequacy_assessment TEXT,
+  fee_pressure_concerns BOOLEAN DEFAULT false,
+
+  -- RESOURCES & COMPETENCE
+  firm_competence_confirmed BOOLEAN NOT NULL DEFAULT false,
+  competence_gaps TEXT,
+  specialist_needs TEXT,
+  resource_availability_confirmed BOOLEAN,
+
+  -- OVERALL ASSESSMENT
+  overall_risk_rating TEXT NOT NULL, -- 'low', 'moderate', 'high', 'very_high', 'decline'
+  risk_rating_rationale TEXT NOT NULL,
+
+  -- RECOMMENDATION
+  recommendation TEXT NOT NULL, -- 'accept', 'accept_with_conditions', 'decline', 'discontinue'
+  conditions TEXT, -- If accept_with_conditions
+  decline_reason TEXT, -- If decline
+
+  -- APPROVALS
+  prepared_by UUID REFERENCES auth.users(id),
+  prepared_at TIMESTAMPTZ DEFAULT NOW(),
+  reviewed_by UUID REFERENCES auth.users(id),
+  reviewed_at TIMESTAMPTZ,
+  approved_by UUID REFERENCES auth.users(id), -- Must be partner
+  approved_at TIMESTAMPTZ,
+  approval_notes TEXT,
+
+  -- Status
+  status TEXT NOT NULL DEFAULT 'draft', -- 'draft', 'pending_review', 'pending_approval', 'approved', 'rejected'
+
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_client_risk_client ON client_risk_assessments(client_id);
+CREATE INDEX IF NOT EXISTS idx_client_risk_firm ON client_risk_assessments(firm_id);
+CREATE INDEX IF NOT EXISTS idx_client_risk_status ON client_risk_assessments(status);
+CREATE INDEX IF NOT EXISTS idx_client_risk_rating ON client_risk_assessments(overall_risk_rating);
+
+-- =====================================================
+-- PART 3: ENGAGEMENT LETTERS
+-- Requirement: Document agreed terms (AU-C 210)
+-- =====================================================
+
+CREATE TABLE IF NOT EXISTS engagement_letters (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  engagement_id UUID NOT NULL,
+  firm_id UUID NOT NULL,
+  client_id UUID NOT NULL,
+
+  -- Letter type
+  letter_type TEXT NOT NULL, -- 'initial', 'recurring', 'amendment', 'scope_change', 'fee_change'
+  template_id UUID, -- Reference to template used
+
+  -- Version control
+  version INTEGER NOT NULL DEFAULT 1,
+  parent_letter_id UUID REFERENCES engagement_letters(id),
+  is_current BOOLEAN DEFAULT true,
+
+  -- Content sections
+  engagement_objectives TEXT NOT NULL,
+  scope_of_services TEXT NOT NULL,
+  auditor_responsibilities TEXT NOT NULL,
+  management_responsibilities TEXT NOT NULL,
+  tcwg_responsibilities TEXT, -- Those Charged With Governance
+
+  -- Deliverables
+  deliverables JSONB,
+  /*
+  Array of {
+    deliverable: string,
+    due_date: date,
+    format: string
+  }
+  */
+
+  -- Timeline
+  expected_start_date DATE,
+  expected_completion_date DATE,
+  report_date DATE,
+  key_milestones JSONB,
+
+  -- Fee arrangement
+  fee_type TEXT, -- 'fixed', 'hourly', 'capped', 'contingent'
+  fee_amount DECIMAL,
+  fee_currency TEXT DEFAULT 'USD',
+  billing_terms TEXT,
+  out_of_pocket_terms TEXT,
+  fee_increase_terms TEXT,
+
+  -- Terms and conditions
+  terms_and_conditions JSONB,
+  limitation_of_liability TEXT,
+  dispute_resolution TEXT,
+  governing_law TEXT,
+  termination_clause TEXT,
+
+  -- Required confirmations
+  independence_confirmed BOOLEAN DEFAULT false,
+  predecessor_communication_completed BOOLEAN DEFAULT false,
+  risk_assessment_approved BOOLEAN DEFAULT false,
+
+  -- Full letter content (rich text)
+  letter_content JSONB, -- TipTap format
+  letter_content_text TEXT, -- Plain text version
+
+  -- Status workflow
+  status TEXT NOT NULL DEFAULT 'draft',
+  -- 'draft', 'internal_review', 'partner_approved', 'sent_to_client',
+  -- 'client_acknowledged', 'signed', 'superseded', 'terminated'
+
+  -- Internal approvals
+  prepared_by UUID REFERENCES auth.users(id),
+  prepared_at TIMESTAMPTZ,
+  reviewed_by UUID REFERENCES auth.users(id),
+  reviewed_at TIMESTAMPTZ,
+  partner_approved_by UUID REFERENCES auth.users(id),
+  partner_approved_at TIMESTAMPTZ,
+
+  -- Client interaction
+  sent_to TEXT, -- Email address
+  sent_at TIMESTAMPTZ,
+  sent_method TEXT, -- 'email', 'mail', 'portal', 'in_person'
+
+  -- Client acknowledgment
+  acknowledged_at TIMESTAMPTZ,
+  acknowledged_by_name TEXT,
+  acknowledged_by_title TEXT,
+  acknowledgment_method TEXT, -- 'email_reply', 'signed_copy', 'portal', 'verbal'
+  acknowledgment_notes TEXT,
+
+  -- Client signature
+  signed_at TIMESTAMPTZ,
+  signatory_name TEXT,
+  signatory_title TEXT,
+  signature_data JSONB, -- {ip_address, user_agent, signature_image_url}
+  signed_document_url TEXT, -- URL to signed PDF
+
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_letters_engagement ON engagement_letters(engagement_id);
+CREATE INDEX IF NOT EXISTS idx_letters_firm ON engagement_letters(firm_id);
+CREATE INDEX IF NOT EXISTS idx_letters_client ON engagement_letters(client_id);
+CREATE INDEX IF NOT EXISTS idx_letters_status ON engagement_letters(status);
+CREATE INDEX IF NOT EXISTS idx_letters_current ON engagement_letters(is_current) WHERE is_current = true;
+
+-- =====================================================
+-- PART 4: PREDECESSOR AUDITOR COMMUNICATIONS
+-- Requirement: Communicate with predecessor (AU-C 210.11-12)
+-- =====================================================
+
+CREATE TABLE IF NOT EXISTS predecessor_communications (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  engagement_id UUID NOT NULL,
+  firm_id UUID NOT NULL,
+  client_id UUID NOT NULL,
+
+  -- Predecessor identification
+  predecessor_firm_name TEXT NOT NULL,
+  predecessor_contact_name TEXT,
+  predecessor_contact_title TEXT,
+  predecessor_contact_email TEXT,
+  predecessor_contact_phone TEXT,
+  predecessor_address TEXT,
+
+  -- Client consent
+  client_consent_required BOOLEAN DEFAULT true,
+  client_consent_obtained BOOLEAN DEFAULT false,
+  client_consent_date DATE,
+  client_consent_method TEXT, -- 'written', 'email', 'verbal'
+  client_consent_document_id UUID, -- Reference to uploaded consent
+
+  -- Initial inquiry
+  initial_inquiry_date DATE,
+  initial_inquiry_method TEXT, -- 'letter', 'email', 'phone'
+  initial_inquiry_document_id UUID,
+
+  -- Standard inquiries per AU-C 210
+  inquiries JSONB,
+  /*
+  {
+    information_integrity: {
+      question: "Are you aware of any information about management integrity?",
+      response: string,
+      concerns: boolean
+    },
+    disagreements_management: {
+      question: "Were there disagreements with management?",
+      response: string,
+      concerns: boolean
+    },
+    communications_tcwg: {
+      question: "Were there significant communications with TCWG?",
+      response: string,
+      concerns: boolean
+    },
+    reason_for_change: {
+      question: "Why is the client changing auditors?",
+      response: string,
+      concerns: boolean
+    },
+    unpaid_fees: {
+      question: "Are there any unpaid fees?",
+      response: string,
+      concerns: boolean
+    },
+    fraud_illegal_acts: {
+      question: "Were there any fraud or illegal acts identified?",
+      response: string,
+      concerns: boolean
+    },
+    internal_control_deficiencies: {
+      question: "Were any significant deficiencies or material weaknesses identified?",
+      response: string,
+      concerns: boolean
+    }
+  }
+  */
+
+  -- Response tracking
+  response_received BOOLEAN DEFAULT false,
+  response_date DATE,
+  response_method TEXT, -- 'letter', 'email', 'phone', 'meeting'
+  response_document_id UUID,
+  response_summary TEXT,
+
+  -- Workpaper access
+  workpaper_access_requested BOOLEAN DEFAULT false,
+  workpaper_access_granted BOOLEAN,
+  workpapers_reviewed TEXT,
+  workpaper_review_notes TEXT,
+
+  -- Non-response handling
+  no_response_follow_up_date DATE,
+  no_response_follow_up_method TEXT,
+  no_response_final_date DATE,
+
+  -- Assessment
+  concerns_identified BOOLEAN DEFAULT false,
+  concerns_description TEXT,
+  impact_on_acceptance TEXT, -- 'no_impact', 'increased_risk', 'decline_engagement'
+
+  -- Resolution
+  resolution_notes TEXT,
+  resolved_by UUID REFERENCES auth.users(id),
+  resolved_at TIMESTAMPTZ,
+
+  -- Status
+  status TEXT DEFAULT 'pending', -- 'pending', 'in_progress', 'completed', 'not_required', 'unable_to_complete'
+
+  created_by UUID REFERENCES auth.users(id),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_predecessor_engagement ON predecessor_communications(engagement_id);
+CREATE INDEX IF NOT EXISTS idx_predecessor_firm ON predecessor_communications(firm_id);
+CREATE INDEX IF NOT EXISTS idx_predecessor_status ON predecessor_communications(status);
+
+-- =====================================================
+-- PART 5: AML/KYC COMPLIANCE
+-- Requirement: Anti-money laundering due diligence
+-- =====================================================
+
+CREATE TABLE IF NOT EXISTS client_aml_records (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  client_id UUID NOT NULL,
+  firm_id UUID NOT NULL,
+
+  -- Record type
+  record_type TEXT NOT NULL, -- 'initial', 'periodic_review', 'triggered_review'
+  review_date DATE NOT NULL DEFAULT CURRENT_DATE,
+
+  -- CLIENT IDENTIFICATION
+  identification_verified BOOLEAN NOT NULL DEFAULT false,
+  verification_date DATE,
+  verification_method TEXT, -- 'document', 'electronic', 'in_person'
+
+  -- For Entities
+  legal_name_verified BOOLEAN,
+  registration_verified BOOLEAN,
+  registration_number TEXT,
+  registration_jurisdiction TEXT,
+  registration_document_id UUID,
+
+  -- For Individuals (key persons)
+  key_individuals JSONB,
+  /*
+  Array of {
+    name: string,
+    role: string,
+    id_type: string,
+    id_number: string,
+    id_verified: boolean,
+    verification_date: date
+  }
+  */
+
+  -- BENEFICIAL OWNERSHIP
+  beneficial_owners JSONB,
+  /*
+  Array of {
+    name: string,
+    ownership_percentage: number,
+    control_type: string,
+    nationality: string,
+    residence: string,
+    pep_status: boolean,
+    verified: boolean
+  }
+  */
+  beneficial_ownership_verified BOOLEAN DEFAULT false,
+  ownership_structure_complex BOOLEAN DEFAULT false,
+  ownership_structure_notes TEXT,
+
+  -- PEP SCREENING (Politically Exposed Persons)
+  pep_screening_completed BOOLEAN DEFAULT false,
+  pep_screening_date DATE,
+  pep_screening_provider TEXT,
+  pep_identified BOOLEAN DEFAULT false,
+  pep_details TEXT,
+  pep_risk_mitigation TEXT,
+
+  -- SANCTIONS SCREENING
+  sanctions_screening_completed BOOLEAN DEFAULT false,
+  sanctions_screening_date DATE,
+  sanctions_lists_checked TEXT[], -- 'OFAC', 'UN', 'EU', 'UK', etc.
+  sanctions_match BOOLEAN DEFAULT false,
+  sanctions_match_details TEXT,
+  sanctions_false_positive BOOLEAN,
+
+  -- ADVERSE MEDIA
+  adverse_media_screening_completed BOOLEAN DEFAULT false,
+  adverse_media_date DATE,
+  adverse_media_findings TEXT,
+
+  -- RISK CLASSIFICATION
+  aml_risk_rating TEXT NOT NULL, -- 'low', 'medium', 'high'
+  risk_factors JSONB,
+  /*
+  {
+    geographic_risk: {level: string, notes: string},
+    industry_risk: {level: string, notes: string},
+    client_type_risk: {level: string, notes: string},
+    transaction_risk: {level: string, notes: string},
+    product_risk: {level: string, notes: string}
+  }
+  */
+  risk_rating_rationale TEXT,
+
+  -- ENHANCED DUE DILIGENCE (for high-risk)
+  edd_required BOOLEAN DEFAULT false,
+  edd_completed BOOLEAN DEFAULT false,
+  edd_procedures JSONB,
+  edd_findings TEXT,
+  edd_approved_by UUID REFERENCES auth.users(id),
+  edd_approved_at TIMESTAMPTZ,
+
+  -- SOURCE OF FUNDS/WEALTH
+  source_of_funds_understood BOOLEAN,
+  source_of_funds_description TEXT,
+  source_of_wealth_understood BOOLEAN,
+  source_of_wealth_description TEXT,
+
+  -- ONGOING MONITORING
+  monitoring_frequency TEXT, -- 'annual', 'semi_annual', 'quarterly'
+  next_review_date DATE,
+  last_transaction_review_date DATE,
+
+  -- SUSPICIOUS ACTIVITY
+  suspicious_activity_identified BOOLEAN DEFAULT false,
+  sar_filed BOOLEAN DEFAULT false,
+  sar_reference TEXT,
+  sar_date DATE,
+
+  -- Approvals
+  prepared_by UUID REFERENCES auth.users(id),
+  prepared_at TIMESTAMPTZ DEFAULT NOW(),
+  approved_by UUID REFERENCES auth.users(id),
+  approved_at TIMESTAMPTZ,
+
+  -- Status
+  status TEXT DEFAULT 'pending', -- 'pending', 'completed', 'requires_edd', 'declined'
+
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_aml_client ON client_aml_records(client_id);
+CREATE INDEX IF NOT EXISTS idx_aml_firm ON client_aml_records(firm_id);
+CREATE INDEX IF NOT EXISTS idx_aml_risk ON client_aml_records(aml_risk_rating);
+CREATE INDEX IF NOT EXISTS idx_aml_next_review ON client_aml_records(next_review_date);
+
+-- =====================================================
+-- PART 6: ENGAGEMENT ACCEPTANCE CHECKLIST
+-- Requirement: Ensure all acceptance requirements met
+-- =====================================================
+
+CREATE TABLE IF NOT EXISTS engagement_acceptance_checklists (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  engagement_id UUID NOT NULL,
+  firm_id UUID NOT NULL,
+  client_id UUID NOT NULL,
+
+  -- Engagement identification
+  engagement_type TEXT NOT NULL,
+  fiscal_year_end DATE,
+
+  -- PRE-CONDITIONS (AU-C 210.06)
+  preconditions JSONB NOT NULL DEFAULT '{}',
+  /*
+  {
+    acceptable_framework: {met: boolean, notes: string},
+    management_responsibilities_acknowledged: {met: boolean, notes: string},
+    access_to_information_expected: {met: boolean, notes: string},
+    no_scope_limitations_expected: {met: boolean, notes: string}
+  }
+  */
+  preconditions_met BOOLEAN,
+
+  -- CLIENT ACCEPTANCE/CONTINUANCE
+  client_risk_assessment_id UUID REFERENCES client_risk_assessments(id),
+  client_risk_acceptable BOOLEAN,
+
+  -- INDEPENDENCE
+  independence_evaluation_completed BOOLEAN DEFAULT false,
+  all_team_independent BOOLEAN,
+  independence_threats_mitigated BOOLEAN,
+  fee_dependency_acceptable BOOLEAN,
+
+  -- COMPETENCE & RESOURCES
+  firm_competence_confirmed BOOLEAN DEFAULT false,
+  resources_available BOOLEAN,
+  specialist_needs_identified BOOLEAN,
+  specialists_available BOOLEAN,
+
+  -- PREDECESSOR COMMUNICATION (new clients)
+  is_new_client BOOLEAN,
+  predecessor_communication_id UUID REFERENCES predecessor_communications(id),
+  predecessor_communication_completed BOOLEAN,
+  predecessor_concerns_resolved BOOLEAN,
+
+  -- AML/KYC
+  aml_record_id UUID REFERENCES client_aml_records(id),
+  aml_clearance_obtained BOOLEAN,
+
+  -- CONFLICTS OF INTEREST
+  conflict_check_completed BOOLEAN DEFAULT false,
+  conflicts_identified BOOLEAN,
+  conflicts_resolved BOOLEAN,
+
+  -- ENGAGEMENT LETTER
+  engagement_letter_id UUID REFERENCES engagement_letters(id),
+  engagement_letter_signed BOOLEAN,
+
+  -- QUALITY CONSIDERATIONS
+  eqcr_required BOOLEAN,
+  consultation_required BOOLEAN,
+  high_risk_procedures_needed BOOLEAN,
+
+  -- OVERALL ACCEPTANCE
+  all_requirements_met BOOLEAN,
+  acceptance_decision TEXT, -- 'accept', 'accept_with_conditions', 'decline'
+  conditions_if_any TEXT,
+  decline_reason_if_any TEXT,
+
+  -- Approvals
+  prepared_by UUID REFERENCES auth.users(id),
+  prepared_at TIMESTAMPTZ DEFAULT NOW(),
+  partner_approved_by UUID REFERENCES auth.users(id),
+  partner_approved_at TIMESTAMPTZ,
+  second_partner_required BOOLEAN DEFAULT false,
+  second_partner_approved_by UUID REFERENCES auth.users(id),
+  second_partner_approved_at TIMESTAMPTZ,
+
+  -- Status
+  status TEXT DEFAULT 'in_progress', -- 'in_progress', 'pending_approval', 'approved', 'rejected'
+
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_acceptance_engagement ON engagement_acceptance_checklists(engagement_id);
+CREATE INDEX IF NOT EXISTS idx_acceptance_firm ON engagement_acceptance_checklists(firm_id);
+CREATE INDEX IF NOT EXISTS idx_acceptance_status ON engagement_acceptance_checklists(status);
+
+-- =====================================================
+-- PART 7: HELPER FUNCTIONS
+-- =====================================================
+
+-- Function to check if team member is independent for engagement
+CREATE OR REPLACE FUNCTION check_team_independence(
+  p_user_id UUID,
+  p_engagement_id UUID
+)
+RETURNS TABLE (
+  is_independent BOOLEAN,
+  issues TEXT[]
+) AS $$
+DECLARE
+  v_issues TEXT[] := '{}';
+  v_is_independent BOOLEAN := true;
+  latest_declaration RECORD;
+BEGIN
+  -- Get latest independence declaration
+  SELECT * INTO latest_declaration
+  FROM independence_declarations
+  WHERE user_id = p_user_id
+    AND (engagement_id = p_engagement_id OR engagement_id IS NULL)
+    AND expires_at > CURRENT_DATE
+  ORDER BY declared_at DESC
+  LIMIT 1;
+
+  -- Check if declaration exists
+  IF latest_declaration IS NULL THEN
+    v_is_independent := false;
+    v_issues := array_append(v_issues, 'No current independence declaration on file');
+  ELSIF NOT latest_declaration.is_independent THEN
+    v_is_independent := false;
+    v_issues := array_append(v_issues, 'Independence declaration indicates non-independence');
+  END IF;
+
+  -- Check for unresolved conflicts
+  IF EXISTS (
+    SELECT 1 FROM conflict_of_interest_register
+    WHERE p_user_id = ANY(user_ids)
+      AND engagement_id = p_engagement_id
+      AND status NOT IN ('cleared', 'mitigated')
+  ) THEN
+    v_is_independent := false;
+    v_issues := array_append(v_issues, 'Unresolved conflict of interest exists');
+  END IF;
+
+  RETURN QUERY SELECT v_is_independent, v_issues;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Function to check engagement acceptance readiness
+CREATE OR REPLACE FUNCTION check_engagement_acceptance_ready(p_engagement_id UUID)
+RETURNS TABLE (
+  is_ready BOOLEAN,
+  missing_requirements TEXT[]
+) AS $$
+DECLARE
+  v_missing TEXT[] := '{}';
+  v_is_ready BOOLEAN := true;
+  checklist RECORD;
+BEGIN
+  SELECT * INTO checklist
+  FROM engagement_acceptance_checklists
+  WHERE engagement_id = p_engagement_id
+  ORDER BY created_at DESC
+  LIMIT 1;
+
+  IF checklist IS NULL THEN
+    RETURN QUERY SELECT false, ARRAY['Acceptance checklist not started'];
+    RETURN;
+  END IF;
+
+  -- Check each requirement
+  IF NOT COALESCE(checklist.preconditions_met, false) THEN
+    v_is_ready := false;
+    v_missing := array_append(v_missing, 'Preconditions not confirmed');
+  END IF;
+
+  IF NOT COALESCE(checklist.client_risk_acceptable, false) THEN
+    v_is_ready := false;
+    v_missing := array_append(v_missing, 'Client risk assessment not approved');
+  END IF;
+
+  IF NOT COALESCE(checklist.all_team_independent, false) THEN
+    v_is_ready := false;
+    v_missing := array_append(v_missing, 'Team independence not confirmed');
+  END IF;
+
+  IF NOT COALESCE(checklist.firm_competence_confirmed, false) THEN
+    v_is_ready := false;
+    v_missing := array_append(v_missing, 'Firm competence not confirmed');
+  END IF;
+
+  IF checklist.is_new_client AND NOT COALESCE(checklist.predecessor_communication_completed, false) THEN
+    v_is_ready := false;
+    v_missing := array_append(v_missing, 'Predecessor communication not completed');
+  END IF;
+
+  IF NOT COALESCE(checklist.aml_clearance_obtained, false) THEN
+    v_is_ready := false;
+    v_missing := array_append(v_missing, 'AML/KYC clearance not obtained');
+  END IF;
+
+  IF NOT COALESCE(checklist.engagement_letter_signed, false) THEN
+    v_is_ready := false;
+    v_missing := array_append(v_missing, 'Engagement letter not signed');
+  END IF;
+
+  RETURN QUERY SELECT v_is_ready, v_missing;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- =====================================================
+-- PART 8: RLS POLICIES
+-- =====================================================
+
+-- Enable RLS
+ALTER TABLE independence_declarations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE conflict_of_interest_register ENABLE ROW LEVEL SECURITY;
+ALTER TABLE client_risk_assessments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE engagement_letters ENABLE ROW LEVEL SECURITY;
+ALTER TABLE predecessor_communications ENABLE ROW LEVEL SECURITY;
+ALTER TABLE client_aml_records ENABLE ROW LEVEL SECURITY;
+ALTER TABLE engagement_acceptance_checklists ENABLE ROW LEVEL SECURITY;
+
+-- Independence declarations policies
+CREATE POLICY "Users can view own declarations"
+  ON independence_declarations FOR SELECT
+  USING (user_id = auth.uid() OR
+         firm_id IN (SELECT firm_id FROM firm_users WHERE user_id = auth.uid() AND role IN ('admin', 'partner', 'manager')));
+
+CREATE POLICY "Users can create own declarations"
+  ON independence_declarations FOR INSERT
+  WITH CHECK (user_id = auth.uid());
+
+CREATE POLICY "Users can update own declarations"
+  ON independence_declarations FOR UPDATE
+  USING (user_id = auth.uid() OR
+         firm_id IN (SELECT firm_id FROM firm_users WHERE user_id = auth.uid() AND role IN ('admin', 'partner')));
+
+-- Conflict register policies
+CREATE POLICY "Users can view conflicts in their firm"
+  ON conflict_of_interest_register FOR SELECT
+  USING (firm_id IN (SELECT firm_id FROM firm_users WHERE user_id = auth.uid()));
+
+CREATE POLICY "Managers can manage conflicts"
+  ON conflict_of_interest_register FOR ALL
+  USING (firm_id IN (SELECT firm_id FROM firm_users WHERE user_id = auth.uid() AND role IN ('admin', 'partner', 'manager')));
+
+-- Client risk assessment policies
+CREATE POLICY "Users can view client risk assessments in their firm"
+  ON client_risk_assessments FOR SELECT
+  USING (firm_id IN (SELECT firm_id FROM firm_users WHERE user_id = auth.uid()));
+
+CREATE POLICY "Managers can manage client risk assessments"
+  ON client_risk_assessments FOR ALL
+  USING (firm_id IN (SELECT firm_id FROM firm_users WHERE user_id = auth.uid() AND role IN ('admin', 'partner', 'manager')));
+
+-- Engagement letters policies
+CREATE POLICY "Users can view engagement letters in their firm"
+  ON engagement_letters FOR SELECT
+  USING (firm_id IN (SELECT firm_id FROM firm_users WHERE user_id = auth.uid()));
+
+CREATE POLICY "Users can manage engagement letters in their firm"
+  ON engagement_letters FOR ALL
+  USING (firm_id IN (SELECT firm_id FROM firm_users WHERE user_id = auth.uid()));
+
+-- Predecessor communications policies
+CREATE POLICY "Users can view predecessor communications in their firm"
+  ON predecessor_communications FOR SELECT
+  USING (firm_id IN (SELECT firm_id FROM firm_users WHERE user_id = auth.uid()));
+
+CREATE POLICY "Managers can manage predecessor communications"
+  ON predecessor_communications FOR ALL
+  USING (firm_id IN (SELECT firm_id FROM firm_users WHERE user_id = auth.uid() AND role IN ('admin', 'partner', 'manager')));
+
+-- AML records policies
+CREATE POLICY "Users can view AML records in their firm"
+  ON client_aml_records FOR SELECT
+  USING (firm_id IN (SELECT firm_id FROM firm_users WHERE user_id = auth.uid()));
+
+CREATE POLICY "Managers can manage AML records"
+  ON client_aml_records FOR ALL
+  USING (firm_id IN (SELECT firm_id FROM firm_users WHERE user_id = auth.uid() AND role IN ('admin', 'partner', 'manager')));
+
+-- Acceptance checklist policies
+CREATE POLICY "Users can view acceptance checklists in their firm"
+  ON engagement_acceptance_checklists FOR SELECT
+  USING (firm_id IN (SELECT firm_id FROM firm_users WHERE user_id = auth.uid()));
+
+CREATE POLICY "Users can manage acceptance checklists in their firm"
+  ON engagement_acceptance_checklists FOR ALL
+  USING (firm_id IN (SELECT firm_id FROM firm_users WHERE user_id = auth.uid()));
+
+-- =====================================================
+-- MIGRATION COMPLETE
+-- =====================================================
+
+COMMENT ON TABLE independence_declarations IS 'Independence declarations per AICPA Ethics/PCAOB Independence Rules';
+COMMENT ON TABLE conflict_of_interest_register IS 'Register of identified conflicts of interest';
+COMMENT ON TABLE client_risk_assessments IS 'Client acceptance/continuance risk assessments per AU-C 210';
+COMMENT ON TABLE engagement_letters IS 'Engagement letter management with version control';
+COMMENT ON TABLE predecessor_communications IS 'Predecessor auditor communications per AU-C 210';
+COMMENT ON TABLE client_aml_records IS 'AML/KYC due diligence records';
+COMMENT ON TABLE engagement_acceptance_checklists IS 'Engagement acceptance requirements checklist';

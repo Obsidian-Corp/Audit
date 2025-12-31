@@ -1,0 +1,225 @@
+-- =====================================================================
+-- MIGRATION: Modify audit_procedures table
+-- Ticket: DB-007
+-- Purpose: Add workpaper linking columns and enhanced status tracking
+--          for procedure-workpaper relationship and sign-off workflow
+-- =====================================================================
+
+-- Add primary_workpaper_id to link procedures to their main workpaper
+ALTER TABLE public.audit_procedures
+  ADD COLUMN IF NOT EXISTS primary_workpaper_id UUID REFERENCES public.audit_workpapers(id) ON DELETE SET NULL;
+
+-- Add procedure_reference for human-readable cross-references (e.g., "P-A-001")
+ALTER TABLE public.audit_procedures
+  ADD COLUMN IF NOT EXISTS procedure_reference VARCHAR(50);
+
+-- Add sign-off tracking columns
+ALTER TABLE public.audit_procedures
+  ADD COLUMN IF NOT EXISTS prepared_by UUID REFERENCES auth.users(id) ON DELETE SET NULL;
+
+ALTER TABLE public.audit_procedures
+  ADD COLUMN IF NOT EXISTS prepared_at TIMESTAMPTZ;
+
+ALTER TABLE public.audit_procedures
+  ADD COLUMN IF NOT EXISTS reviewed_by UUID REFERENCES auth.users(id) ON DELETE SET NULL;
+
+ALTER TABLE public.audit_procedures
+  ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ;
+
+-- Add execution tracking
+ALTER TABLE public.audit_procedures
+  ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ;
+
+ALTER TABLE public.audit_procedures
+  ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;
+
+-- Add time tracking
+ALTER TABLE public.audit_procedures
+  ADD COLUMN IF NOT EXISTS estimated_hours DECIMAL(5,2);
+
+ALTER TABLE public.audit_procedures
+  ADD COLUMN IF NOT EXISTS actual_hours DECIMAL(5,2);
+
+-- Add rollforward support
+ALTER TABLE public.audit_procedures
+  ADD COLUMN IF NOT EXISTS is_rolled_forward BOOLEAN DEFAULT FALSE;
+
+ALTER TABLE public.audit_procedures
+  ADD COLUMN IF NOT EXISTS prior_year_procedure_id UUID REFERENCES public.audit_procedures(id) ON DELETE SET NULL;
+
+ALTER TABLE public.audit_procedures
+  ADD COLUMN IF NOT EXISTS rollforward_notes TEXT;
+
+-- Enhanced status with more granular workflow states
+-- Note: We're adding a new column to avoid conflicts with existing 'status'
+ALTER TABLE public.audit_procedures
+  ADD COLUMN IF NOT EXISTS workflow_status VARCHAR(50) DEFAULT 'not_started'
+    CHECK (workflow_status IN (
+      'not_started',       -- Initial state
+      'in_progress',       -- Being worked on
+      'pending_review',    -- Submitted for review
+      'in_review',         -- Reviewer has opened it
+      'changes_requested', -- Reviewer requested changes
+      'approved',          -- Reviewer approved
+      'signed_off',        -- Manager/Partner signed off
+      'not_applicable'     -- N/A for this engagement
+    ));
+
+-- Create indexes for new columns
+CREATE INDEX IF NOT EXISTS idx_procedures_primary_workpaper
+  ON public.audit_procedures(primary_workpaper_id)
+  WHERE primary_workpaper_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_procedures_reference
+  ON public.audit_procedures(procedure_reference);
+
+CREATE INDEX IF NOT EXISTS idx_procedures_workflow_status
+  ON public.audit_procedures(workflow_status);
+
+CREATE INDEX IF NOT EXISTS idx_procedures_assigned_prepared
+  ON public.audit_procedures(assigned_to, workflow_status)
+  WHERE workflow_status IN ('not_started', 'in_progress', 'changes_requested');
+
+CREATE INDEX IF NOT EXISTS idx_procedures_pending_review
+  ON public.audit_procedures(engagement_id, workflow_status)
+  WHERE workflow_status IN ('pending_review', 'in_review');
+
+CREATE INDEX IF NOT EXISTS idx_procedures_rolled_forward
+  ON public.audit_procedures(is_rolled_forward)
+  WHERE is_rolled_forward = TRUE;
+
+-- Function to auto-generate procedure_reference
+CREATE OR REPLACE FUNCTION generate_procedure_reference()
+RETURNS TRIGGER AS $$
+DECLARE
+  v_section TEXT;
+  v_seq INT;
+BEGIN
+  -- Only generate if procedure_reference is not already set
+  IF NEW.procedure_reference IS NOT NULL THEN
+    RETURN NEW;
+  END IF;
+
+  -- Get section code from the procedure name or area
+  -- Default to 'GEN' if no section found
+  v_section := COALESCE(
+    UPPER(LEFT(REGEXP_REPLACE(NEW.name, '[^A-Za-z]', '', 'g'), 3)),
+    'GEN'
+  );
+
+  -- Count existing procedures for this engagement in this section
+  SELECT COUNT(*) + 1 INTO v_seq
+  FROM public.audit_procedures
+  WHERE engagement_id = NEW.engagement_id
+    AND procedure_reference LIKE 'P-' || v_section || '-%';
+
+  -- Generate reference: P-XXX-NNN
+  NEW.procedure_reference := 'P-' || v_section || '-' || LPAD(v_seq::TEXT, 3, '0');
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Drop trigger if exists and recreate
+DROP TRIGGER IF EXISTS trigger_generate_procedure_reference ON public.audit_procedures;
+
+CREATE TRIGGER trigger_generate_procedure_reference
+  BEFORE INSERT ON public.audit_procedures
+  FOR EACH ROW
+  EXECUTE FUNCTION generate_procedure_reference();
+
+-- Function to auto-set timestamps based on status changes
+CREATE OR REPLACE FUNCTION update_procedure_timestamps()
+RETURNS TRIGGER AS $$
+BEGIN
+  -- Set started_at when moving from not_started
+  IF OLD.workflow_status = 'not_started' AND NEW.workflow_status = 'in_progress' THEN
+    NEW.started_at := COALESCE(NEW.started_at, NOW());
+  END IF;
+
+  -- Set prepared_at when submitting for review
+  IF OLD.workflow_status IN ('not_started', 'in_progress', 'changes_requested')
+     AND NEW.workflow_status = 'pending_review' THEN
+    NEW.prepared_at := NOW();
+    NEW.prepared_by := COALESCE(NEW.prepared_by, auth.uid());
+  END IF;
+
+  -- Set reviewed_at when approving
+  IF OLD.workflow_status IN ('pending_review', 'in_review')
+     AND NEW.workflow_status = 'approved' THEN
+    NEW.reviewed_at := NOW();
+    NEW.reviewed_by := COALESCE(NEW.reviewed_by, auth.uid());
+  END IF;
+
+  -- Set completed_at when signed off
+  IF NEW.workflow_status = 'signed_off' AND OLD.workflow_status != 'signed_off' THEN
+    NEW.completed_at := NOW();
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Drop trigger if exists and recreate
+DROP TRIGGER IF EXISTS trigger_update_procedure_timestamps ON public.audit_procedures;
+
+CREATE TRIGGER trigger_update_procedure_timestamps
+  BEFORE UPDATE ON public.audit_procedures
+  FOR EACH ROW
+  EXECUTE FUNCTION update_procedure_timestamps();
+
+-- Migrate existing status values to workflow_status
+UPDATE public.audit_procedures
+SET workflow_status = CASE
+  WHEN status = 'not_started' THEN 'not_started'
+  WHEN status = 'in_progress' THEN 'in_progress'
+  WHEN status = 'pending_review' THEN 'pending_review'
+  WHEN status = 'in_review' THEN 'in_review'
+  WHEN status = 'complete' THEN 'signed_off'
+  WHEN status = 'signed_off' THEN 'signed_off'
+  WHEN status = 'approved' THEN 'approved'
+  WHEN status = 'n/a' OR status = 'not_applicable' THEN 'not_applicable'
+  WHEN status IS NULL THEN 'not_started'
+  ELSE 'not_started'
+END
+WHERE workflow_status IS NULL OR workflow_status = 'not_started';
+
+-- Generate procedure_reference for existing procedures that don't have one
+WITH numbered_procedures AS (
+  SELECT
+    id,
+    engagement_id,
+    name,
+    ROW_NUMBER() OVER (PARTITION BY engagement_id ORDER BY created_at, id) as seq
+  FROM public.audit_procedures
+  WHERE procedure_reference IS NULL
+)
+UPDATE public.audit_procedures p
+SET procedure_reference = 'P-GEN-' || LPAD(np.seq::TEXT, 3, '0')
+FROM numbered_procedures np
+WHERE p.id = np.id;
+
+-- Add comments for documentation
+COMMENT ON COLUMN public.audit_procedures.primary_workpaper_id IS 'Primary workpaper documenting this procedure execution';
+COMMENT ON COLUMN public.audit_procedures.procedure_reference IS 'Human-readable reference code (e.g., P-REV-001)';
+COMMENT ON COLUMN public.audit_procedures.workflow_status IS 'Detailed workflow status for sign-off tracking';
+COMMENT ON COLUMN public.audit_procedures.prepared_by IS 'User who prepared/executed this procedure';
+COMMENT ON COLUMN public.audit_procedures.prepared_at IS 'Timestamp when procedure was marked complete by preparer';
+COMMENT ON COLUMN public.audit_procedures.reviewed_by IS 'User who reviewed this procedure';
+COMMENT ON COLUMN public.audit_procedures.reviewed_at IS 'Timestamp when procedure was reviewed';
+COMMENT ON COLUMN public.audit_procedures.is_rolled_forward IS 'Whether this procedure was rolled forward from prior year';
+COMMENT ON COLUMN public.audit_procedures.prior_year_procedure_id IS 'Reference to prior year procedure if rolled forward';
+COMMENT ON COLUMN public.audit_procedures.estimated_hours IS 'Budgeted hours for this procedure';
+COMMENT ON COLUMN public.audit_procedures.actual_hours IS 'Actual hours spent on this procedure';
+
+-- Success message
+DO $$
+BEGIN
+  RAISE NOTICE '✅ DB-007: audit_procedures table modified successfully';
+  RAISE NOTICE '   - Added primary_workpaper_id linking';
+  RAISE NOTICE '   - Added procedure_reference with auto-generation';
+  RAISE NOTICE '   - Added sign-off tracking columns';
+  RAISE NOTICE '   - Added workflow_status with granular states';
+  RAISE NOTICE '   - Added rollforward support';
+  RAISE NOTICE '   - Created timestamp automation triggers';
+END $$;
